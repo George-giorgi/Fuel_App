@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diesel Desk | Fuel records</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="loginScreen" class="login-screen">
+    <div class="login-panel">
+      <div class="brand-mark"><span class="brand-pulse"></span> DIESEL DESK</div>
+      <p class="eyebrow">FLEET OPERATIONS / 01</p>
+      <h1>Every fill,<br><em>accounted for.</em></h1>
+      <p class="login-copy">A clear, fast logbook for the vehicles that keep everything moving.</p>
+      <form id="loginForm" class="login-form">
+        <label>Email address<input id="loginEmail" type="email" value="manager@dieseldesk.local" required></label>
+        <label>Password<input id="loginPassword" type="password" value="diesel123" required></label>
+        <button class="primary-button" type="submit">Enter the desk <span>-></span></button>
+      </form>
+      <p class="demo-note">Demo access: manager@dieseldesk.local / diesel123</p>
+    </div>
+    <div class="login-art" aria-hidden="true">
+      <div class="art-grid"></div>
+      <div class="art-copy">TRACK<br><strong>THE<br>ESSENTIALS</strong></div>
+      <div class="art-road"><div class="art-car"><span></span><i></i><b></b></div></div>
+      <div class="art-stats"><span>LIVE FLEET</span><strong>24 / 7</strong></div>
+    </div>
+  </div>
+
+  <main id="appScreen" class="app-shell hidden">
+    <aside class="sidebar">
+      <div class="brand-mark"><span class="brand-pulse"></span> DIESEL DESK</div>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav><a class="active" href="#newFill"><span class="nav-number">01</span> New fill</a><a href="#history"><span class="nav-number">02</span> History</a></nav>
+      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>System online</strong><small>Records save locally</small></div></div>
+    </aside>
+
+    <section class="content">
+      <header class="topbar"><div><p class="eyebrow">MONITOR / FUEL LOG</p><h2>Good morning, manager.</h2></div><button id="logoutButton" class="text-button" type="button">Sign out <span>-></span></button></header>
+
+      <div class="dashboard-grid">
+        <section id="newFill" class="entry-section">
+          <div class="section-heading"><div><p class="eyebrow">NEW ENTRY</p><h3>Record a fill</h3></div><span class="live-tag"><i></i> LIVE</span></div>
+          <div class="entry-layout">
+            <form id="fuelForm" class="fuel-form">
+              <div class="field-row"><label>Registration number<input id="regNumber" name="regNumber" placeholder="e.g. AB12 CDE" required></label><label>Fuel type<select id="fuelType" name="fuelType"><option>Diesel</option><option>AdBlue</option><option>Petrol</option></select></label></div>
+              <div class="field-row"><label>Driver name<input id="firstName" name="firstName" placeholder="First name" required></label><label>Surname<input id="surname" name="surname" placeholder="Surname" required></label></div>
+              <div class="field-row"><label>Mileage <span class="unit">km</span><input id="mileage" name="mileage" type="number" min="0" placeholder="Current odometer" required></label><label>Tank capacity <span class="unit">litres</span><input id="capacity" name="capacity" type="number" min="1" step="0.1" placeholder="Tank size" required></label></div>
+              <div class="field-row"><label>Litres added <span class="unit">litres</span><input id="litres" name="litres" type="number" min="0.1" step="0.1" placeholder="Amount filled" required></label><label>Cost <span class="unit">optional</span><input id="cost" name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label></div>
+              <div class="notice"><span>i</span><p>Date and time are captured automatically when you submit this report.</p></div>
+              <button class="primary-button submit-button" type="submit">Save fill report <span>-></span></button>
+            </form>
+            <div class="animation-stage" aria-label="Animated diesel filling illustration">
+              <div class="stage-label">FILLING STATUS <span id="fillPercent">0%</span></div>
+              <div class="tank"><div id="tankLevel" class="tank-level"></div><div class="tank-lines"></div><span class="tank-title">DIESEL</span><span class="tank-capacity">CAPACITY</span></div>
+              <div class="fuel-stream"></div><div class="hose"></div><div class="nozzle"><div></div></div>
+              <div class="car"><div class="car-window"></div><div class="car-body"></div><div class="wheel wheel-a"></div><div class="wheel wheel-b"></div><div class="car-light"></div></div>
+              <div class="road-line"></div>
+              <p id="animationMessage" class="animation-message">Ready for the next vehicle</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="history" class="history-section">
+          <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Filling actions</h3></div><button id="exportButton" class="outline-button" type="button">Export all <span>↓</span></button></div>
+          <div id="emptyState" class="empty-state"><div class="empty-icon">--</div><h4>No fills recorded yet</h4><p>Your saved fuel reports will appear here.</p></div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </div>
+      <footer><span>Diesel Desk / Fleet fuel control</span><span id="recordCount">0 records</span></footer>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
