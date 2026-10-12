@@ -1,3 +1,37 @@
 
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor settings
+.vscode/
+.idea/
+
+# Python cache (for future OCR work)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local test uploads
+uploads/
 
 /carsRegs
