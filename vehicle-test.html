@@ -4,88 +4,376 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Diesel Desk - Vehicle Test</title>
+  <title>Diesel Desk - Vehicle Lookup</title>
+
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       font-family: Arial, sans-serif;
-      max-width: 600px;
+      max-width: 650px;
       margin: 40px auto;
       padding: 20px;
+      color: #1f2937;
+      background: #f3f6f8;
     }
 
-    input, button {
-      padding: 12px;
+    h1 {
+      margin-bottom: 5px;
+      color: #145c40;
+    }
+
+    .subtitle {
+      color: #64748b;
+      margin-bottom: 30px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    input {
+      display: block;
+      width: 100%;
+      padding: 14px;
       font-size: 16px;
-      margin: 6px 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: white;
+      outline: none;
     }
 
-    input { width: 95%; }
-    button { cursor: pointer; }
-    #result { margin-top: 20px; }
+    input:focus {
+      border-color: #16845b;
+      box-shadow: 0 0 0 3px #16845b22;
+    }
+
+    .search-container {
+      position: relative;
+    }
+
+    #suggestions {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      z-index: 10;
+      background: white;
+      border: 1px solid #dbe2e8;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 8px 20px #00000012;
+    }
+
+    .suggestion {
+      display: block;
+      width: 100%;
+      padding: 13px;
+      border: none;
+      border-bottom: 1px solid #edf0f2;
+      background: white;
+      text-align: left;
+      cursor: pointer;
+      font-size: 15px;
+      color: #1f2937;
+    }
+
+    .suggestion:last-child {
+      border-bottom: none;
+    }
+
+    .suggestion:hover,
+    .suggestion:focus {
+      background: #eaf6ef;
+      outline: none;
+    }
+
+    .suggestion strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .suggestion small {
+      color: #64748b;
+    }
+
+    .primary-button {
+      width: 100%;
+      margin-top: 14px;
+      padding: 13px;
+      border: none;
+      border-radius: 8px;
+      background: #176b48;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .primary-button:hover {
+      background: #105638;
+    }
+
+    .primary-button:disabled {
+      opacity: 0.6;
+      cursor: wait;
+    }
+
+    #result {
+      margin-top: 25px;
+    }
+
+    .vehicle-card,
+    .message {
+      padding: 18px;
+      margin-top: 12px;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      background: white;
+    }
+
+    .vehicle-card h3 {
+      margin: 0 0 14px;
+      color: #176b48;
+    }
+
+    .vehicle-card p {
+      margin: 9px 0;
+    }
+
+    .eyebrow {
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      color: #64748b;
+    }
+
+    .hidden {
+      display: none;
+    }
   </style>
 </head>
+
 <body>
   <h1>Diesel Desk</h1>
-  <h2>Vehicle lookup test</h2>
+  <p class="subtitle">Fleet vehicle lookup</p>
 
-  <label for="registration">Vehicle registration</label>
-  <input id="registration" value="TEST-241" autocomplete="off">
+  <form id="searchForm">
+    <label for="registration">Vehicle registration</label>
 
-  <button id="searchButton">Search vehicle</button>
+    <div class="search-container">
+      <input
+        id="registration"
+        type="text"
+        placeholder="Start typing a registration..."
+        autocomplete="off"
+        spellcheck="false"
+        aria-autocomplete="list"
+        aria-controls="suggestions"
+      >
 
-  <div id="result" role="status"></div>
+      <div
+        id="suggestions"
+        role="listbox"
+        class="hidden"
+      ></div>
+    </div>
+
+    <button id="searchButton" class="primary-button" type="submit">
+      Search vehicle
+    </button>
+  </form>
+
+  <div id="result" role="status" aria-live="polite"></div>
 
   <script type="module">
     import { supabase } from './supabase.js';
 
+    const form = document.getElementById('searchForm');
     const registrationInput = document.getElementById('registration');
     const searchButton = document.getElementById('searchButton');
+    const suggestions = document.getElementById('suggestions');
     const result = document.getElementById('result');
 
-    searchButton.addEventListener('click', async () => {
-      const registration = registrationInput.value.trim().toUpperCase();
+    let debounceTimer;
+    let requestNumber = 0;
 
-      if (!registration) {
-        result.textContent = 'Enter a vehicle registration.';
+    function showMessage(message) {
+      result.replaceChildren();
+
+      const paragraph = document.createElement('p');
+      paragraph.className = 'message';
+      paragraph.textContent = message;
+
+      result.append(paragraph);
+    }
+
+    function hideSuggestions() {
+      suggestions.replaceChildren();
+      suggestions.classList.add('hidden');
+    }
+
+    function showSuggestions(vehicles) {
+      suggestions.replaceChildren();
+
+      if (vehicles.length === 0) {
+        suggestions.classList.add('hidden');
         return;
       }
 
-      searchButton.disabled = true;
-      result.textContent = 'Searching...';
+      vehicles.forEach((vehicle) => {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'suggestion';
+        option.setAttribute('role', 'option');
 
-      try {
-        const { data, error } = await supabase
-          .from('vehicles')
-          .select('registration, make, model, tank_capacity_litres')
-          .eq('registration', registration)
-          .maybeSingle();
+        const registration = document.createElement('strong');
+        registration.textContent = vehicle.registration;
 
-        if (error) throw error;
+        const description = document.createElement('small');
+        description.textContent =
+          [vehicle.make, vehicle.model].filter(Boolean).join(' ') ||
+          'Vehicle details unavailable';
 
-        if (!data) {
-          result.textContent = 'Vehicle not found.';
-          return;
-        }
+        option.append(registration, description);
 
-        result.replaceChildren();
+        option.addEventListener('click', () => {
+          registrationInput.value = vehicle.registration;
+          hideSuggestions();
+          form.requestSubmit();
+        });
 
-        const heading = document.createElement('h3');
-        heading.textContent = 'Vehicle found';
+        suggestions.append(option);
+      });
 
-        const details = document.createElement('p');
-        details.textContent =
-          `${data.registration} — ${data.make ?? ''} ${data.model ?? ''}`;
+      suggestions.classList.remove('hidden');
+    }
+
+    async function searchVehicles(term, limit = 10) {
+      return await supabase
+        .from('vehicles')
+        .select('registration, make, model, tank_capacity_litres')
+        .ilike('registration', `%${term}%`)
+        .order('registration')
+        .limit(limit);
+    }
+
+    function displayVehicles(vehicles) {
+      result.replaceChildren();
+
+      if (vehicles.length === 0) {
+        showMessage('No matching vehicles found.');
+        return;
+      }
+
+      const heading = document.createElement('h2');
+      heading.textContent = `Found ${vehicles.length} vehicle(s)`;
+      result.append(heading);
+
+      vehicles.forEach((vehicle) => {
+        const card = document.createElement('div');
+        card.className = 'vehicle-card';
+
+        const eyebrow = document.createElement('p');
+        eyebrow.className = 'eyebrow';
+        eyebrow.textContent = 'VEHICLE';
+
+        const title = document.createElement('h3');
+        title.textContent = vehicle.registration;
+
+        const model = document.createElement('p');
+        model.textContent =
+          `Make and model: ${
+            [vehicle.make, vehicle.model].filter(Boolean).join(' ') ||
+            'Not specified'
+          }`;
 
         const capacity = document.createElement('p');
         capacity.textContent =
-          `Tank capacity: ${data.tank_capacity_litres ?? 'Not set'} litres`;
+          `Tank capacity: ${
+            vehicle.tank_capacity_litres ?? 'Not set'
+          } litres`;
 
-        result.append(heading, details, capacity);
+        card.append(eyebrow, title, model, capacity);
+        result.append(card);
+      });
+    }
+
+    registrationInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+
+      const term = registrationInput.value.trim();
+      const currentRequest = ++requestNumber;
+
+      hideSuggestions();
+
+      if (term.length < 2) {
+        return;
+      }
+
+      debounceTimer = setTimeout(async () => {
+        try {
+          const { data, error } = await searchVehicles(term, 10);
+
+          if (currentRequest !== requestNumber) return;
+
+          if (error) throw error;
+
+          showSuggestions(data ?? []);
+        } catch (error) {
+          console.error('Autocomplete failed:', error);
+          hideSuggestions();
+        }
+      }, 250);
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const term = registrationInput.value.trim();
+
+      clearTimeout(debounceTimer);
+      hideSuggestions();
+
+      if (!term) {
+        showMessage('Please enter a vehicle registration.');
+        registrationInput.focus();
+        return;
+      }
+
+      const currentRequest = ++requestNumber;
+
+      searchButton.disabled = true;
+      searchButton.textContent = 'Searching...';
+      showMessage('Searching the vehicle database...');
+
+      try {
+        const { data, error } = await searchVehicles(term, 10);
+
+        if (currentRequest !== requestNumber) return;
+
+        if (error) throw error;
+
+        displayVehicles(data ?? []);
       } catch (error) {
-        console.error(error);
-        result.textContent = 'Could not load the vehicle. Check the Console.';
+        console.error('Vehicle search failed:', error);
+        showMessage('Could not load vehicles. Check the browser Console.');
       } finally {
         searchButton.disabled = false;
+        searchButton.textContent = 'Search vehicle';
+      }
+    });
+
+    document.addEventListener('click', (event) => {
+      if (
+        !suggestions.contains(event.target) &&
+        event.target !== registrationInput
+      ) {
+        hideSuggestions();
       }
     });
   </script>
