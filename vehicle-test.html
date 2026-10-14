@@ -1,0 +1,93 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diesel Desk - Vehicle Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 20px;
+    }
+
+    input, button {
+      padding: 12px;
+      font-size: 16px;
+      margin: 6px 0;
+    }
+
+    input { width: 95%; }
+    button { cursor: pointer; }
+    #result { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Diesel Desk</h1>
+  <h2>Vehicle lookup test</h2>
+
+  <label for="registration">Vehicle registration</label>
+  <input id="registration" value="TEST-241" autocomplete="off">
+
+  <button id="searchButton">Search vehicle</button>
+
+  <div id="result" role="status"></div>
+
+  <script type="module">
+    import { supabase } from './supabase.js';
+
+    const registrationInput = document.getElementById('registration');
+    const searchButton = document.getElementById('searchButton');
+    const result = document.getElementById('result');
+
+    searchButton.addEventListener('click', async () => {
+      const registration = registrationInput.value.trim().toUpperCase();
+
+      if (!registration) {
+        result.textContent = 'Enter a vehicle registration.';
+        return;
+      }
+
+      searchButton.disabled = true;
+      result.textContent = 'Searching...';
+
+      try {
+        const { data, error } = await supabase
+          .from('vehicles')
+          .select('registration, make, model, tank_capacity_litres')
+          .eq('registration', registration)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (!data) {
+          result.textContent = 'Vehicle not found.';
+          return;
+        }
+
+        result.replaceChildren();
+
+        const heading = document.createElement('h3');
+        heading.textContent = 'Vehicle found';
+
+        const details = document.createElement('p');
+        details.textContent =
+          `${data.registration} — ${data.make ?? ''} ${data.model ?? ''}`;
+
+        const capacity = document.createElement('p');
+        capacity.textContent =
+          `Tank capacity: ${data.tank_capacity_litres ?? 'Not set'} litres`;
+
+        result.append(heading, details, capacity);
+      } catch (error) {
+        console.error(error);
+        result.textContent = 'Could not load the vehicle. Check the Console.';
+      } finally {
+        searchButton.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
