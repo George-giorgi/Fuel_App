@@ -31,7 +31,12 @@ __pycache__/
 .venv/
 venv/
 
+
 # Local test uploads
 uploads/
 
 /carsRegs
+
+.env
+.env.*
+!.env.example
