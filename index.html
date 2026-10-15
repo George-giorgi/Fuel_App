@@ -72,7 +72,24 @@
     <aside class="sidebar">
       <div class="brand-mark"><span class="brand-pulse"></span> DIESEL DESK</div>
       <div class="sidebar-label">WORKSPACE</div>
-      <nav><a class="active" href="#newFill"><span class="nav-number">01</span> New fill</a><a href="#history"><span class="nav-number">02</span> History</a></nav>
+      
+
+<nav>
+  <a class="active" href="#newFill">
+    <span class="nav-number">01</span> New fill
+  </a>
+  <a href="#history">
+    <span class="nav-number">02</span> History
+  </a>
+  <a id="deliveriesNav" class="hidden" href="#dieselDeliveries">
+    <span class="nav-number">03</span> Diesel deliveries
+  </a>
+  <a id="inventoryNav" class="hidden" href="#dieselInventory">
+    <span class="nav-number">04</span> Diesel inventory
+  </a>
+</nav>
+
+
       <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>System online</strong><small>Records save locally</small></div></div>
     </aside>
 
@@ -185,6 +202,162 @@
           <div id="historyList" class="history-list"></div>
         </section>
       </div>
+      
+<section id="dieselDeliveries" class="history-section hidden">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">SUPPLIER INVOICES</p>
+      <h3>Diesel deliveries</h3>
+    </div>
+  </div>
+
+  <form id="deliveryForm" class="fuel-form">
+    <div class="field-row">
+      <label>
+        Delivery date
+        <input id="deliveryDate" name="deliveryDate" type="date" required>
+      </label>
+      <label>
+        Supplier name
+        <input id="supplierName" name="supplierName" maxlength="150" placeholder="Supplier name" required>
+      </label>
+    </div>
+
+    <div class="field-row">
+      <label>
+        Invoice reference
+        <input id="invoiceReference" name="invoiceReference" maxlength="100" placeholder="Invoice number">
+      </label>
+      <label>
+        Litres delivered
+        <span class="unit">litres</span>
+        <input id="litresDelivered" name="litresDelivered" type="number" min="0.01" step="0.01" required>
+      </label>
+    </div>
+
+    <div class="field-row">
+      <label>
+        Invoice total excluding VAT
+        <span class="unit">€</span>
+        <input id="invoiceTotalExVat" name="invoiceTotalExVat" type="number" min="0" step="0.01" required>
+      </label>
+      <label>
+        Invoice total including VAT
+        <span class="unit">€</span>
+        <input id="invoiceTotalIncVat" name="invoiceTotalIncVat" type="number" min="0" step="0.01" required>
+      </label>
+    </div>
+
+    <label>
+      Notes
+      <textarea id="deliveryNotes" name="notes" maxlength="1000" placeholder="Optional notes"></textarea>
+    </label>
+
+    <p id="deliveryError" class="login-error hidden" role="alert"></p>
+
+    <button class="primary-button" type="submit">
+      Save supplier invoice <span>→</span>
+    </button>
+  </form>
+
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">SAVED RECORDS</p>
+      <h3>Delivery history</h3>
+    </div>
+    <button id="refreshDeliveriesButton" class="outline-button" type="button">
+      Refresh
+    </button>
+  </div>
+
+  <div id="deliveriesList" class="history-list"></div>
+</section>
+
+<section id="dieselInventory" class="history-section hidden">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">STOCK MANAGEMENT</p>
+      <h3>Diesel inventory</h3>
+    </div>
+    <button id="refreshInventoryButton" class="outline-button" type="button">
+      Refresh
+    </button>
+  </div>
+
+  <div id="inventoryStatus" role="status">
+    Loading inventory...
+  </div>
+
+  <div id="inventorySummary" class="history-list hidden">
+    <div class="history-card">
+      <p class="eyebrow">DIESEL AVAILABLE</p>
+      <h3><span id="inventoryLitres">—</span> litres</h3>
+    </div>
+
+    <div class="history-card">
+      <p class="eyebrow">STOCK VALUE EXCLUDING VAT</p>
+      <h3>€<span id="inventoryValueExVat">—</span></h3>
+    </div>
+
+    <div class="history-card">
+      <p class="eyebrow">STOCK VALUE INCLUDING VAT</p>
+      <h3>€<span id="inventoryValueIncVat">—</span></h3>
+    </div>
+
+    <div class="history-card">
+      <p class="eyebrow">AVERAGE COST PER LITRE</p>
+      <p>Excluding VAT: €<span id="inventoryUnitExVat">—</span></p>
+      <p>Including VAT: €<span id="inventoryUnitIncVat">—</span></p>
+    </div>
+  </div>
+
+  <div id="openingStockPanel" class="fuel-form">
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">INITIAL SETUP</p>
+        <h3>Opening stock</h3>
+      </div>
+    </div>
+
+    <p>
+      Enter the actual diesel already in the tank and its corresponding
+      value. This can only be initialized once.
+    </p>
+
+    <form id="openingStockForm">
+      <div class="field-row">
+        <label>
+          Opening stock (litres)
+          <input id="openingLitres" type="number" min="0" step="0.01" required>
+        </label>
+
+        <label>
+          Value excluding VAT (€)
+          <input id="openingValueExVat" type="number" min="0" step="0.01" required>
+        </label>
+      </div>
+
+      <label>
+        Value including VAT (€)
+        <input id="openingValueIncVat" type="number" min="0" step="0.01" required>
+      </label>
+
+      <label>
+        Notes
+        <textarea id="openingStockNotes" maxlength="1000"
+          placeholder="Optional: source of opening figures"></textarea>
+      </label>
+
+      <p id="openingStockError" class="login-error hidden" role="alert"></p>
+
+      <button class="primary-button" type="submit">
+        Initialize opening stock <span>→</span>
+      </button>
+    </form>
+  </div>
+</section>
+
+
       <footer><span>Diesel Desk / Fleet fuel control</span><span id="recordCount">0 records</span></footer>
     </section>
   </main>

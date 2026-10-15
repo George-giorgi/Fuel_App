@@ -160,6 +160,21 @@ document.getElementById('loginForm').addEventListener('submit', async (event) =>
     }
 
     const employee = dashboardData.employee;
+    isManager = employee.role === 'manager';
+
+deliveriesNav.classList.toggle('hidden', !isManager);
+
+inventoryNav.classList.toggle('hidden', !isManager);
+
+deliveriesSection.classList.add('hidden');
+document.querySelector('.dashboard-grid').classList.remove('hidden');
+
+document.querySelectorAll('.sidebar nav a').forEach((link) => {
+  link.classList.remove('active');
+});
+
+document.querySelector('.sidebar nav a[href="#newFill"]')
+  .classList.add('active');
     const vehicle = dashboardData.vehicle;
     
 document.getElementById('vehicleRegistration').textContent =
@@ -256,7 +271,10 @@ document.getElementById('logoutButton').addEventListener('click', async () => {
     tankLevel.style.height = '0%';
     fillPercent.textContent = '0%';
     animationMessage.textContent = 'Ready for the next vehicle';
-
+    isManager = false;
+deliveriesNav.classList.add('hidden');
+deliveriesSection.classList.add('hidden');
+document.querySelector('.dashboard-grid').classList.remove('hidden');
     // Return to the login screen.
     appScreen.classList.add('hidden');
     loginScreen.classList.remove('hidden');
@@ -385,6 +403,354 @@ document.getElementById('exportButton').addEventListener('click', () => {
 historyList.addEventListener('click', (event) => {
   const id = Number(event.target.dataset.download);
   if (id) downloadReport(records.find((record) => record.id === id));
+});
+
+
+const deliveriesNav = document.getElementById('deliveriesNav');
+const inventoryNav = document.getElementById('inventoryNav');
+const deliveriesSection = document.getElementById('dieselDeliveries');
+const deliveryForm = document.getElementById('deliveryForm');
+const deliveriesList = document.getElementById('deliveriesList');
+const deliveryError = document.getElementById('deliveryError');
+
+let isManager = false;
+
+function showDeliveryError(message) {
+  deliveryError.textContent = message;
+  deliveryError.classList.remove('hidden');
+}
+
+function hideDeliveryError() {
+  deliveryError.textContent = '';
+  deliveryError.classList.add('hidden');
+}
+
+function formatEuro(value) {
+  return new Intl.NumberFormat('en-IE', {
+    style: 'currency',
+    currency: 'EUR'
+  }).format(Number(value));
+}
+
+async function loadDieselDeliveries() {
+  if (!isManager) return;
+
+  deliveriesList.innerHTML = '<p>Loading deliveries...</p>';
+
+  const response = await fetch('/api/diesel-deliveries', {
+    method: 'GET',
+    credentials: 'same-origin'
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || 'Could not load diesel deliveries.');
+  }
+
+  if (!result.deliveries.length) {
+    deliveriesList.innerHTML =
+      '<p>No supplier invoices recorded yet.</p>';
+    return;
+  }
+
+  deliveriesList.innerHTML = result.deliveries.map((delivery) => `
+    <article class="history-item">
+      <div>
+        <strong>${escapeHtml(delivery.supplier_name)}</strong>
+        <small>
+          Date: ${escapeHtml(delivery.delivery_date)}
+          ${delivery.invoice_reference
+            ? ` / Invoice: ${escapeHtml(delivery.invoice_reference)}`
+            : ''}
+        </small>
+        <small>
+          Delivered: ${Number(delivery.litres_delivered).toLocaleString('en-IE')} L
+        </small>
+        <small>
+          Ex VAT: ${formatEuro(delivery.invoice_total_ex_vat)}
+          / Inc VAT: ${formatEuro(delivery.invoice_total_inc_vat)}
+        </small>
+        <small>
+          Price per litre ex VAT: ${formatEuro(delivery.price_per_litre_ex_vat)}
+          / Inc VAT: ${formatEuro(delivery.price_per_litre_inc_vat)}
+        </small>
+        ${delivery.notes
+          ? `<small>Notes: ${escapeHtml(delivery.notes)}</small>`
+          : ''}
+      </div>
+    </article>
+  `).join('');
+}
+
+deliveryForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  if (!isManager) {
+    showDeliveryError('Manager access required.');
+    return;
+  }
+
+  hideDeliveryError();
+
+  const submitButton = deliveryForm.querySelector(
+    'button[type="submit"]'
+  );
+
+  const payload = {
+    deliveryDate: document.getElementById('deliveryDate').value,
+    supplierName: document.getElementById('supplierName').value.trim(),
+    invoiceReference: document.getElementById('invoiceReference').value.trim(),
+    litresDelivered: document.getElementById('litresDelivered').value,
+    invoiceTotalExVat: document.getElementById('invoiceTotalExVat').value,
+    invoiceTotalIncVat: document.getElementById('invoiceTotalIncVat').value,
+    notes: document.getElementById('deliveryNotes').value.trim()
+  };
+
+  submitButton.disabled = true;
+  submitButton.textContent = 'Saving invoice...';
+
+  try {
+    const response = await fetch('/api/diesel-deliveries', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Could not save the supplier invoice.');
+    }
+
+    deliveryForm.reset();
+    hideDeliveryError();
+
+    await loadDieselDeliveries();
+    showToast('Supplier invoice saved successfully.');
+  } catch (error) {
+    showDeliveryError(error.message || 'Could not save the supplier invoice.');
+  } finally {
+    submitButton.disabled = false;
+    submitButton.innerHTML = 'Save supplier invoice <span>→</span>';
+  }
+});
+
+document.getElementById('refreshDeliveriesButton')
+  .addEventListener('click', async () => {
+    try {
+      await loadDieselDeliveries();
+    } catch (error) {
+      showDeliveryError(error.message);
+    }
+  });
+
+deliveriesNav.addEventListener('click', async (event) => {
+  event.preventDefault();
+
+  if (!isManager) return;
+
+  document.querySelector('.dashboard-grid').classList.add('hidden');
+  deliveriesSection.classList.remove('hidden');
+
+  document.querySelectorAll('.sidebar nav a').forEach((link) => {
+    link.classList.remove('active');
+  });
+
+  deliveriesNav.classList.add('active');
+
+  try {
+    await loadDieselDeliveries();
+  } catch (error) {
+    showDeliveryError(error.message);
+  }
+});
+
+document.querySelectorAll('.sidebar nav a[href="#newFill"], .sidebar nav a[href="#history"]')
+  .forEach((link) => {
+    link.addEventListener('click', () => {
+      document.querySelector('.dashboard-grid').classList.remove('hidden');
+      deliveriesSection.classList.add('hidden');
+
+      document.querySelectorAll('.sidebar nav a').forEach((item) => {
+        item.classList.remove('active');
+      });
+
+      link.classList.add('active');
+    });
+  });
+
+document.getElementById('deliveryDate').value =
+  new Date().getFullYear() + '-' +
+  String(new Date().getMonth() + 1).padStart(2, '0') + '-' +
+  String(new Date().getDate()).padStart(2, '0');
+
+
+const inventorySection = document.getElementById('dieselInventory');
+const inventoryStatus = document.getElementById('inventoryStatus');
+const inventorySummary = document.getElementById('inventorySummary');
+const openingStockPanel = document.getElementById('openingStockPanel');
+const openingStockForm = document.getElementById('openingStockForm');
+const openingStockError = document.getElementById('openingStockError');
+
+function setInventoryError(message) {
+  inventoryStatus.textContent = message;
+  inventorySummary.classList.add('hidden');
+}
+
+async function loadDieselInventory() {
+  if (!isManager) return;
+
+  inventoryStatus.textContent = 'Loading inventory...';
+  inventorySummary.classList.add('hidden');
+
+  const response = await fetch('/api/diesel-inventory', {
+    method: 'GET',
+    credentials: 'same-origin'
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || 'Could not load diesel inventory.');
+  }
+
+  const stock = result.inventory;
+
+  if (!stock.is_initialized) {
+    inventoryStatus.textContent =
+      'Opening stock has not been initialized. Enter the real opening figures when they are available.';
+    openingStockPanel.classList.remove('hidden');
+    inventorySummary.classList.add('hidden');
+    return;
+  }
+
+  const litres = Number(stock.litres_on_hand);
+  const valueEx = Number(stock.stock_value_ex_vat);
+  const valueInc = Number(stock.stock_value_inc_vat);
+
+  document.getElementById('inventoryLitres').textContent =
+    litres.toLocaleString('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  document.getElementById('inventoryValueExVat').textContent =
+    valueEx.toLocaleString('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  document.getElementById('inventoryValueIncVat').textContent =
+    valueInc.toLocaleString('en-IE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  document.getElementById('inventoryUnitExVat').textContent =
+    litres > 0 ? formatEuro(valueEx / litres) : '—';
+
+  document.getElementById('inventoryUnitIncVat').textContent =
+    litres > 0 ? formatEuro(valueInc / litres) : '—';
+
+  inventoryStatus.textContent = 'Inventory loaded successfully.';
+  inventorySummary.classList.remove('hidden');
+  openingStockPanel.classList.add('hidden');
+}
+
+inventoryNav.addEventListener('click', async (event) => {
+  event.preventDefault();
+
+  if (!isManager) return;
+
+  document.querySelector('.dashboard-grid').classList.add('hidden');
+  deliveriesSection.classList.add('hidden');
+  inventorySection.classList.remove('hidden');
+
+  document.querySelectorAll('.sidebar nav a').forEach((link) => {
+    link.classList.remove('active');
+  });
+
+  inventoryNav.classList.add('active');
+
+  try {
+    await loadDieselInventory();
+  } catch (error) {
+    setInventoryError(error.message || 'Could not load diesel inventory.');
+  }
+});
+
+document.getElementById('refreshInventoryButton')
+  .addEventListener('click', async () => {
+    try {
+      await loadDieselInventory();
+    } catch (error) {
+      setInventoryError(error.message || 'Could not refresh inventory.');
+    }
+  });
+
+openingStockForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  if (!isManager) {
+    openingStockError.textContent = 'Manager access required.';
+    openingStockError.classList.remove('hidden');
+    return;
+  }
+
+  openingStockError.textContent = '';
+  openingStockError.classList.add('hidden');
+
+  const submitButton = openingStockForm.querySelector('button[type="submit"]');
+
+  const payload = {
+    litres: document.getElementById('openingLitres').value,
+    valueExVat: document.getElementById('openingValueExVat').value,
+    valueIncVat: document.getElementById('openingValueIncVat').value,
+    notes: document.getElementById('openingStockNotes').value.trim()
+  };
+
+  submitButton.disabled = true;
+  submitButton.textContent = 'Initializing...';
+
+  try {
+    const response = await fetch('/api/diesel-inventory/initialize', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Could not initialize opening stock.');
+    }
+
+    openingStockForm.reset();
+    await loadDieselInventory();
+    showToast('Opening stock initialized successfully.');
+  } catch (error) {
+    openingStockError.textContent =
+      error.message || 'Could not initialize opening stock.';
+    openingStockError.classList.remove('hidden');
+  } finally {
+    submitButton.disabled = false;
+    submitButton.innerHTML = 'Initialize opening stock <span>→</span>';
+  }
+});
+
+// Hide the inventory screen when navigating to other sections.
+document.querySelectorAll(
+  '.sidebar nav a[href="#newFill"], .sidebar nav a[href="#history"]'
+).forEach((link) => {
+  link.addEventListener('click', () => {
+    inventorySection.classList.add('hidden');
+  });
+});
+
+deliveriesNav.addEventListener('click', () => {
+  inventorySection.classList.add('hidden');
+});
+
+// Ensure the inventory screen is hidden after logout.
+document.getElementById('logoutButton').addEventListener('click', () => {
+  inventorySection.classList.add('hidden');
+  inventoryNav.classList.add('hidden');
 });
 
 

@@ -371,6 +371,18 @@ async function requireSession(req, res, next) {
 }
 
 
+function requireManager(req, res, next) {
+  if (req.employee?.role !== 'manager') {
+    return res.status(403).json({
+      success: false,
+      error: 'Manager access required.'
+    });
+  }
+
+  return next();
+}
+
+
 app.get('/api/dashboard', requireSession, async (req, res) => {
   try {
     const { data: vehicle, error } = await supabase
@@ -622,7 +634,7 @@ app.post('/api/fuel-transactions', requireSession, async (req, res) => {
     }
 
     const { data, error } = await supabase.rpc(
-      'record_fuel_transaction',
+      'record_fuel_transaction_with_inventory',
       {
         p_employee_id: req.employee.id,
         p_vehicle_id: req.vehicle.id,
@@ -632,8 +644,23 @@ app.post('/api/fuel-transactions', requireSession, async (req, res) => {
       }
     );
 
+  
     if (error) {
       console.error('Fuel transaction failed:', error.message);
+
+      if (error.message.includes('Opening stock must be initialized')) {
+        return res.status(409).json({
+          success: false,
+          error: 'Diesel inventory has not been initialized. Contact your manager before recording a fill.'
+        });
+      }
+
+      if (error.message.includes('Insufficient diesel stock')) {
+        return res.status(409).json({
+          success: false,
+          error: 'Not enough diesel stock is available to record this fill.'
+        });
+      }
 
       return res.status(400).json({
         success: false,
@@ -642,6 +669,7 @@ app.post('/api/fuel-transactions', requireSession, async (req, res) => {
           : 'The fuel transaction could not be saved. Check the reading and try again.'
       });
     }
+
 
     const transaction = data?.[0];
 
@@ -654,12 +682,19 @@ app.post('/api/fuel-transactions', requireSession, async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      transaction: {
-        id: transaction.transaction_id,
-        previousReading: transaction.previous_reading,
-        newReading: transaction.new_reading,
-        litresAdded: transaction.litres_added
-      }
+      
+transaction: {
+  id: transaction.transaction_id,
+  previousReading: transaction.previous_reading,
+  newReading: transaction.new_reading,
+  litresAdded: transaction.litres_added,
+  unitCostExVat: transaction.unit_cost_ex_vat,
+  unitCostIncVat: transaction.unit_cost_inc_vat,
+  costAmountExVat: transaction.cost_amount_ex_vat,
+  costAmountIncVat: transaction.cost_amount_inc_vat,
+  stockLitresRemaining: transaction.stock_litres_remaining
+}
+
     });
   } catch (error) {
     console.error('Unexpected fuel transaction error:', error.message);
@@ -670,6 +705,338 @@ app.post('/api/fuel-transactions', requireSession, async (req, res) => {
     });
   }
 });
+
+
+
+app.post(
+  '/api/diesel-deliveries',
+  requireSession,
+  requireManager,
+  async (req, res) => {
+    try {
+      const {
+        deliveryDate,
+        supplierName,
+        invoiceReference,
+        litresDelivered,
+        invoiceTotalExVat,
+        invoiceTotalIncVat,
+        notes
+      } = req.body || {};
+
+      // Validate the date and supplier.
+      const dateMatch =
+        typeof deliveryDate === 'string' &&
+        /^(\d{4})-(\d{2})-(\d{2})$/.exec(deliveryDate);
+
+      if (
+        !dateMatch ||
+        !Number.isFinite(Date.parse(`${deliveryDate}T00:00:00Z`)) ||
+        new Date(`${deliveryDate}T00:00:00Z`).toISOString().slice(0, 10) !== deliveryDate ||
+        typeof supplierName !== 'string' ||
+        !supplierName.trim() ||
+        supplierName.trim().length > 150
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: 'Enter a valid delivery date and supplier name.'
+        });
+      }
+
+      function parseMoneyOrQuantity(value, fieldName, allowZero = true) {
+        const text = String(value ?? '').trim();
+
+        if (!/^\d{1,10}(\.\d{1,2})?$/.test(text)) {
+          throw new Error(
+            `Enter a valid ${fieldName} with up to two decimal places.`
+          );
+        }
+
+        const number = Number(text);
+
+        if (
+          !Number.isFinite(number) ||
+          (allowZero ? number < 0 : number <= 0)
+        ) {
+          throw new Error(`Enter a valid ${fieldName}.`);
+        }
+
+        return number;
+      }
+
+      let litres;
+      let totalExVat;
+      let totalIncVat;
+
+      try {
+        litres = parseMoneyOrQuantity(
+          litresDelivered,
+          'litres delivered',
+          false
+        );
+        totalExVat = parseMoneyOrQuantity(
+          invoiceTotalExVat,
+          'invoice total excluding VAT'
+        );
+        totalIncVat = parseMoneyOrQuantity(
+          invoiceTotalIncVat,
+          'invoice total including VAT'
+        );
+      } catch (validationError) {
+        return res.status(400).json({
+          success: false,
+          error: validationError.message
+        });
+      }
+
+      if (totalIncVat < totalExVat) {
+        return res.status(400).json({
+          success: false,
+          error: 'The invoice total including VAT cannot be less than the total excluding VAT.'
+        });
+      }
+
+      const reference =
+        typeof invoiceReference === 'string'
+          ? invoiceReference.trim()
+          : '';
+
+      const deliveryNotes =
+        typeof notes === 'string' ? notes.trim() : '';
+
+      if (reference.length > 100 || deliveryNotes.length > 1000) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invoice reference or notes are too long.'
+        });
+      }
+
+      // The database function saves the invoice and updates stock atomically.
+      const { data, error } = await supabase.rpc(
+        'record_diesel_delivery',
+        {
+          p_delivery_date: deliveryDate,
+          p_supplier_name: supplierName.trim(),
+          p_invoice_reference: reference || null,
+          p_litres_delivered: litres,
+          p_invoice_total_ex_vat: totalExVat,
+          p_invoice_total_inc_vat: totalIncVat,
+          p_notes: deliveryNotes || null
+        }
+      );
+
+      if (error) {
+        console.error('Diesel delivery operation failed:', error.message);
+
+        if (error.message.includes('Opening stock must be initialized')) {
+          return res.status(409).json({
+            success: false,
+            error: 'Opening stock has not been initialized. Set up the real opening stock before recording deliveries.'
+          });
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: 'Could not record the delivery. Check the invoice details and inventory setup.'
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        delivery: data.delivery,
+        inventory: data.inventory
+      });
+    } catch (error) {
+      console.error('Diesel delivery error:', error.message);
+
+      return res.status(500).json({
+        success: false,
+        error: 'An unexpected error occurred while saving the supplier delivery.'
+      });
+    }
+  }
+);
+
+
+
+app.get(
+  '/api/diesel-deliveries',
+  requireSession,
+  requireManager,
+  async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('diesel_deliveries')
+        .select(`
+          id,
+          delivery_date,
+          supplier_name,
+          invoice_reference,
+          litres_delivered,
+          invoice_total_ex_vat,
+          invoice_total_inc_vat,
+          price_per_litre_ex_vat,
+          price_per_litre_inc_vat,
+          notes,
+          created_at
+        `)
+        .order('delivery_date', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) {
+        console.error('Diesel delivery history failed:', error.message);
+        return res.status(500).json({
+          success: false,
+          error: 'Could not load diesel delivery history.'
+        });
+      }
+
+      return res.json({
+        success: true,
+        deliveries: data
+      });
+    } catch (error) {
+      console.error('Diesel delivery history error:', error.message);
+      return res.status(500).json({
+        success: false,
+        error: 'An unexpected error occurred while loading diesel delivery history.'
+      });
+    }
+  }
+);
+
+app.get(
+  '/api/diesel-inventory',
+  requireSession,
+  requireManager,
+  async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from('diesel_inventory_state')
+        .select('*')
+        .eq('id', 1)
+        .single();
+
+      if (error) {
+        console.error('Inventory lookup failed:', error.message);
+        return res.status(500).json({
+          success: false,
+          error: 'Could not load diesel inventory.'
+        });
+      }
+
+      return res.json({
+        success: true,
+        inventory: data
+      });
+    } catch (error) {
+      console.error('Inventory lookup error:', error.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Could not load diesel inventory.'
+      });
+    }
+  }
+);
+
+app.post(
+  '/api/diesel-inventory/initialize',
+  requireSession,
+  requireManager,
+  async (req, res) => {
+    try {
+      const { litres, valueExVat, valueIncVat, notes } = req.body || {};
+
+      function parseAmount(value, fieldName) {
+        const text = String(value ?? '').trim();
+
+        if (!/^\d{1,10}(\.\d{1,2})?$/.test(text)) {
+          throw new Error(
+            `Enter a valid ${fieldName} with up to two decimal places.`
+          );
+        }
+
+        const amount = Number(text);
+
+        if (!Number.isFinite(amount) || amount < 0) {
+          throw new Error(`Enter a valid ${fieldName}.`);
+        }
+
+        return amount;
+      }
+
+      let openingLitres;
+      let openingValueExVat;
+      let openingValueIncVat;
+
+      try {
+        openingLitres = parseAmount(litres, 'opening litres');
+        openingValueExVat = parseAmount(valueExVat, 'opening value excluding VAT');
+        openingValueIncVat = parseAmount(valueIncVat, 'opening value including VAT');
+      } catch (validationError) {
+        return res.status(400).json({
+          success: false,
+          error: validationError.message
+        });
+      }
+
+      if (openingValueIncVat < openingValueExVat) {
+        return res.status(400).json({
+          success: false,
+          error: 'The value including VAT cannot be less than the value excluding VAT.'
+        });
+      }
+
+      const openingNotes = typeof notes === 'string' ? notes.trim() : '';
+
+      if (openingNotes.length > 1000) {
+        return res.status(400).json({
+          success: false,
+          error: 'Notes are too long.'
+        });
+      }
+
+      const { data, error } = await supabase.rpc(
+        'initialize_diesel_inventory',
+        {
+          p_litres: openingLitres,
+          p_value_ex_vat: openingValueExVat,
+          p_value_inc_vat: openingValueIncVat,
+          p_notes: openingNotes || null
+        }
+      );
+
+      if (error) {
+        console.error('Inventory initialization failed:', error.message);
+
+        if (error.message.includes('already initialized')) {
+          return res.status(409).json({
+            success: false,
+            error: 'Opening stock has already been initialized.'
+          });
+        }
+
+        return res.status(400).json({
+          success: false,
+          error: 'Could not initialize inventory. Check the opening figures.'
+        });
+      }
+
+      return res.status(201).json({
+        success: true,
+        result: data
+      });
+    } catch (error) {
+      console.error('Inventory initialization error:', error.message);
+
+      return res.status(500).json({
+        success: false,
+        error: 'An unexpected error occurred during initialization.'
+      });
+    }
+  }
+);
 
 
 app.listen(PORT, () => {
