@@ -16,11 +16,48 @@
       <p class="eyebrow">FLEET OPERATIONS / 01</p>
       <h1>Every fill,<br><em>accounted for.</em></h1>
       <p class="login-copy">A clear, fast logbook for the vehicles that keep everything moving.</p>
-      <form id="loginForm" class="login-form">
-        <label>Email address<input id="loginEmail" type="email" value="manager@dieseldesk.local" required></label>
-        <label>Password<input id="loginPassword" type="password" value="diesel123" required></label>
-        <button class="primary-button" type="submit">Enter the desk <span>-></span></button>
-      </form>
+      
+<form id="loginForm" class="login-form">
+  <label>
+    Vehicle registration
+    <input
+      id="loginRegistration"
+      name="registration"
+      type="text"
+      placeholder="e.g. TEST-241"
+      autocomplete="off"
+      autocapitalize="characters"
+      required
+    >
+  </label>
+
+  <label>
+    Personal PIN
+    <input
+      id="loginPin"
+      name="pin"
+      type="password"
+      inputmode="numeric"
+      pattern="[0-9]{4,8}"
+      minlength="4"
+      maxlength="8"
+      placeholder="Enter your PIN"
+      autocomplete="off"
+      required
+    >
+  </label>
+
+  <p id="loginError" class="login-error hidden" role="alert"></p>
+
+  <button id="loginButton" class="primary-button" type="submit">
+    Sign in <span>→</span>
+  </button>
+</form>
+
+<p class="demo-note">
+  Sign in with your assigned vehicle registration and personal PIN.
+</p>
+
       <p class="demo-note">Demo access: manager@dieseldesk.local / diesel123</p>
     </div>
     <div class="login-art" aria-hidden="true">

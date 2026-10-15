@@ -12,7 +12,7 @@ const tankLevel = document.getElementById('tankLevel');
 const fillPercent = document.getElementById('fillPercent');
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 
-let records = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let records = [];
 
 function showToast(message) {
   toast.textContent = message;
@@ -69,46 +69,152 @@ function emailReport(record) {
   window.location.href = `mailto:${REPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-document.getElementById('loginForm').addEventListener('submit', (event) => {
+
+document.getElementById('loginForm').addEventListener('submit', async (event) => {
   event.preventDefault();
-  loginScreen.classList.add('hidden');
-  appScreen.classList.remove('hidden');
-  renderHistory();
+
+  const registration = document
+    .getElementById('loginRegistration')
+    .value.trim()
+    .toUpperCase();
+
+  const pin = document.getElementById('loginPin').value;
+  const loginError = document.getElementById('loginError');
+  const loginButton = document.getElementById('loginButton');
+
+  loginError.textContent = '';
+  loginError.classList.add('hidden');
+  loginButton.disabled = true;
+  loginButton.textContent = 'Signing in...';
+
+  try {
+    const loginResponse = await fetch('/api/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ registration, pin })
+    });
+
+    const loginData = await loginResponse.json();
+
+    if (!loginResponse.ok) {
+      throw new Error(loginData.error || 'Login failed.');
+    }
+
+    const dashboardResponse = await fetch('/api/dashboard', {
+      method: 'GET',
+      credentials: 'same-origin'
+    });
+
+    const dashboardData = await dashboardResponse.json();
+
+    if (!dashboardResponse.ok) {
+      await fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'same-origin'
+      });
+
+      throw new Error(
+        dashboardData.error || 'Could not load dashboard.'
+      );
+    }
+
+    const employee = dashboardData.employee;
+    const vehicle = dashboardData.vehicle;
+
+    document.querySelector('.topbar h2').textContent =
+      `Welcome, ${employee.firstName}.`;
+
+    document.getElementById('regNumber').value =
+      vehicle.registration;
+
+    document.getElementById('firstName').value =
+      employee.firstName;
+
+    document.getElementById('surname').value =
+      employee.surname;
+
+    document.getElementById('capacity').value =
+      vehicle.tank_capacity_litres ?? '';
+
+    document.getElementById('regNumber').readOnly = true;
+    document.getElementById('firstName').readOnly = true;
+    document.getElementById('surname').readOnly = true;
+    document.getElementById('capacity').readOnly = true;
+
+    document.getElementById('loginPin').value = '';
+
+    loginScreen.classList.add('hidden');
+    appScreen.classList.remove('hidden');
+
+    renderHistory();
+  } catch (error) {
+    loginError.textContent = error.message;
+    loginError.classList.remove('hidden');
+  } finally {
+    loginButton.disabled = false;
+    loginButton.innerHTML = 'Sign in <span>→</span>';
+  }
 });
 
-document.getElementById('logoutButton').addEventListener('click', () => {
-  appScreen.classList.add('hidden');
-  loginScreen.classList.remove('hidden');
+
+
+document.getElementById('logoutButton').addEventListener('click', async () => {
+  const logoutButton = document.getElementById('logoutButton');
+
+  logoutButton.disabled = true;
+
+  try {
+    const response = await fetch('/api/logout', {
+      method: 'POST',
+      credentials: 'same-origin'
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Could not sign out.');
+    }
+
+    // Clear employee and vehicle details from the screen.
+    fuelForm.reset();
+    document.getElementById('regNumber').readOnly = false;
+    document.getElementById('firstName').readOnly = false;
+    document.getElementById('surname').readOnly = false;
+    document.getElementById('capacity').readOnly = false;
+
+    document.getElementById('loginForm').reset();
+
+    // Clear the dashboard's temporary visual state.
+    animationStage.classList.remove('filling');
+    tankLevel.style.height = '0%';
+    fillPercent.textContent = '0%';
+    animationMessage.textContent = 'Ready for the next vehicle';
+
+    // Return to the login screen.
+    appScreen.classList.add('hidden');
+    loginScreen.classList.remove('hidden');
+
+    showToast('Signed out successfully.');
+  } catch (error) {
+    showToast(error.message || 'Sign out failed. Please try again.');
+  } finally {
+    logoutButton.disabled = false;
+  }
 });
+
+
 
 fuelForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  const data = new FormData(fuelForm);
-  const record = {
-    id: Date.now(),
-    regNumber: data.get('regNumber').trim().toUpperCase(),
-    fuelType: data.get('fuelType'),
-    firstName: data.get('firstName').trim(),
-    surname: data.get('surname').trim(),
-    mileage: Number(data.get('mileage')),
-    capacity: Number(data.get('capacity')),
-    litres: Number(data.get('litres')),
-    cost: Number(data.get('cost')) || 0,
-    createdAt: new Date().toISOString()
-  };
-  records.unshift(record);
-  saveRecords();
-  renderHistory();
-  animationStage.classList.add('filling');
-  const percentage = Math.min(100, Math.round((record.litres / record.capacity) * 100));
-  tankLevel.style.height = `${Math.max(12, percentage)}%`;
-  fillPercent.textContent = `${percentage}%`;
-  animationMessage.textContent = `Filling ${record.regNumber} - report captured`;
-  downloadReport(record);
-  showToast('Report saved. Opening email draft...');
-  window.setTimeout(() => emailReport(record), 700);
-  fuelForm.reset();
+
+  showToast(
+    'Fuel submissions are temporarily disabled while we connect database saving.'
+  );
 });
+
 
 document.getElementById('exportButton').addEventListener('click', () => {
   if (!records.length) {
