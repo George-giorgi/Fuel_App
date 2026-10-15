@@ -610,7 +610,7 @@ app.post('/api/fuel-transactions', requireSession, async (req, res) => {
     }
 
     const newReading = Number(readingText);
-
+    
     if (!Number.isSafeInteger(Number(rawMileage)) ||
         !Number.isInteger(Number(rawMileage)) ||
         Number(rawMileage) < 0 ||
