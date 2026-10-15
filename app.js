@@ -123,6 +123,28 @@ document.getElementById('loginForm').addEventListener('submit', async (event) =>
 
     const employee = dashboardData.employee;
     const vehicle = dashboardData.vehicle;
+    
+document.getElementById('vehicleRegistration').textContent =
+  vehicle.registration || '—';
+
+document.getElementById('vehicleDescription').textContent =
+  [vehicle.make, vehicle.model].filter(Boolean).join(' ') ||
+  'Make and model not recorded';
+
+document.getElementById('vehicleCapacity').textContent =
+  vehicle.tank_capacity_litres ?? '—';
+
+document.getElementById('vehicleCumulative').textContent =
+  vehicle.last_cumulative_reading ?? '—';
+
+document.getElementById('vehicleLastFill').textContent =
+  vehicle.last_fill_litres ?? '—';
+
+document.getElementById('vehicleMileage').textContent =
+  vehicle.last_vehicle_mileage == null
+    ? '—'
+    : Number(vehicle.last_vehicle_mileage).toLocaleString('en-IE');
+
 
     document.querySelector('.topbar h2').textContent =
       `Welcome, ${employee.firstName}.`;

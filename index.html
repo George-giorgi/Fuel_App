@@ -79,6 +79,54 @@
     <section class="content">
       <header class="topbar"><div><p class="eyebrow">MONITOR / FUEL LOG</p><h2>Good morning, manager.</h2></div><button id="logoutButton" class="text-button" type="button">Sign out <span>-></span></button></header>
 
+<section class="vehicle-panel" aria-labelledby="vehiclePanelTitle">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">VEHICLE OVERVIEW</p>
+      <h3 id="vehiclePanelTitle">Your assigned vehicle</h3>
+    </div>
+    <span class="vehicle-status">
+      <span class="status-dot"></span> ACTIVE
+    </span>
+  </div>
+
+  <div class="vehicle-identity">
+    <div class="vehicle-icon" aria-hidden="true">🚐</div>
+    <div>
+      <p id="vehicleRegistration" class="vehicle-registration">—</p>
+      <p id="vehicleDescription" class="vehicle-description">
+        Vehicle details will appear after login
+      </p>
+    </div>
+  </div>
+
+  <div class="vehicle-stats">
+    <article class="vehicle-stat">
+      <span>Tank capacity</span>
+      <strong id="vehicleCapacity">—</strong>
+      <small>Litres</small>
+    </article>
+
+    <article class="vehicle-stat">
+      <span>Last cumulative reading</span>
+      <strong id="vehicleCumulative">—</strong>
+      <small>Meter reading</small>
+    </article>
+
+    <article class="vehicle-stat">
+      <span>Previous fill</span>
+      <strong id="vehicleLastFill">—</strong>
+      <small>Litres</small>
+    </article>
+
+    <article class="vehicle-stat">
+      <span>Last vehicle mileage</span>
+      <strong id="vehicleMileage">—</strong>
+      <small>Odometer reading</small>
+    </article>
+  </div>
+</section>
+
       <div class="dashboard-grid">
         <section id="newFill" class="entry-section">
           <div class="section-heading"><div><p class="eyebrow">NEW ENTRY</p><h3>Record a fill</h3></div><span class="live-tag"><i></i> LIVE</span></div>

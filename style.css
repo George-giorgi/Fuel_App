@@ -1,1 +1,116 @@
 :root{--ink:#202b2b;--muted:#718080;--paper:#f4f7f3;--line:#dce5df;--lime:#c9ef69;--teal:#0d7770;--orange:#ff8b5f;--white:#fff}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:Manrope, sans-serif}button,input,select{font:inherit}button{cursor:pointer}h1,h2,h3,h4,p{margin:0}.hidden{display:none!important}.eyebrow,.sidebar-label,.stage-label{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.13em;color:var(--muted)}.brand-mark{font:800 15px Manrope,sans-serif;letter-spacing:.08em;display:flex;align-items:center;gap:9px}.brand-pulse{width:9px;height:9px;background:var(--lime);border-radius:50%;box-shadow:0 0 0 5px #c9ef6930;display:inline-block}.login-screen{min-height:100vh;display:grid;grid-template-columns:minmax(420px, .85fr) 1.15fr}.login-panel{padding:50px clamp(32px,8vw,125px);display:flex;flex-direction:column;justify-content:center;background:#e8f0e8}.login-panel .brand-mark{position:absolute;top:50px}.login-panel .eyebrow{margin-bottom:20px}.login-panel h1{font-size:clamp(44px,5vw,76px);line-height:.98;letter-spacing:-.07em;margin-bottom:25px}.login-panel h1 em{font-style:normal;color:var(--teal)}.login-copy{font-size:15px;line-height:1.7;color:#607070;max-width:380px;margin-bottom:38px}.login-form{display:grid;gap:17px;max-width:400px}.login-form label,.fuel-form label{font-size:11px;font-weight:700;color:#536161;display:grid;gap:8px;position:relative}.login-form input,.fuel-form input,.fuel-form select{border:1px solid var(--line);background:#fff;border-radius:3px;padding:14px 15px;color:var(--ink);outline:none;transition:.2s}.login-form input:focus,.fuel-form input:focus,.fuel-form select:focus{border-color:var(--teal);box-shadow:0 0 0 3px #0d777015}.primary-button{border:0;background:var(--teal);color:#fff;border-radius:3px;padding:15px 18px;font-size:12px;font-weight:800;letter-spacing:.01em;display:flex;justify-content:space-between;align-items:center;transition:.25s}.primary-button:hover{background:#095c57;transform:translateY(-2px)}.primary-button span,.outline-button span,.text-button span{font-size:18px;font-weight:400}.demo-note{font:10px 'DM Mono',monospace;color:#84918c;margin-top:20px}.login-art{position:relative;overflow:hidden;background:#3f5850;color:#fff;min-height:620px}.art-grid{position:absolute;inset:0;background:linear-gradient(#ffffff0c 1px,transparent 1px),linear-gradient(90deg,#ffffff0c 1px,transparent 1px);background-size:46px 46px;mask-image:linear-gradient(90deg,black,transparent)}.art-copy{position:absolute;left:10%;top:13%;font:11px 'DM Mono',monospace;line-height:1.5;letter-spacing:.16em;color:#b8cbbd}.art-copy strong{font:800 clamp(48px,7vw,100px)/.82 Manrope,sans-serif;letter-spacing:-.09em;color:var(--lime)}.art-stats{position:absolute;right:9%;top:14%;font:10px 'DM Mono',monospace;text-align:right;color:#c0d1c6;display:grid;gap:5px}.art-stats strong{font:700 27px Manrope;color:#fff}.art-road{position:absolute;bottom:17%;height:150px;left:0;right:0;background:#31453f;border-top:1px solid #b9ccbe55;border-bottom:1px solid #b9ccbe55}.art-road:before,.road-line{content:'';position:absolute;top:50%;left:0;right:0;border-top:2px dashed #d8e7d533}.art-car{position:absolute;right:20%;top:40px;width:190px;height:60px;background:var(--lime);border-radius:55px 65px 12px 9px;animation:drive 5s ease-in-out infinite}.art-car:before{content:'';position:absolute;left:35px;top:-28px;width:91px;height:36px;background:var(--lime);border-radius:60px 70px 0 0;transform:skew(-16deg)}.art-car span,.art-car i{position:absolute;z-index:1;top:-20px;width:35px;height:20px;background:#52716a;border:2px solid #d9f297}.art-car span{left:45px}.art-car i{left:84px}.art-car b,.art-car:after{content:'';position:absolute;bottom:-13px;width:27px;height:27px;border-radius:50%;background:#182725;border:7px solid #90ad9a}.art-car b{left:28px}.art-car:after{right:22px}@keyframes drive{0%,100%{transform:translateX(20px)}50%{transform:translateX(-50px)}}.app-shell{min-height:100vh;display:grid;grid-template-columns:240px 1fr}.sidebar{padding:38px 27px 30px;background:#203a36;color:#edf4e9;display:flex;flex-direction:column}.sidebar .brand-mark{margin-bottom:90px}.sidebar .brand-pulse{background:var(--lime)}.sidebar-label{color:#90aba0;margin-bottom:20px}.sidebar nav{display:grid;gap:6px}.sidebar nav a{color:#a9beb3;text-decoration:none;padding:14px 12px;font-size:13px;border-radius:3px}.sidebar nav a.active,.sidebar nav a:hover{background:#ffffff10;color:#fff}.nav-number{font:10px 'DM Mono',monospace;color:#7e9a8f;margin-right:13px}.sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff1a;padding-top:20px;display:flex;gap:10px;align-items:flex-start;font-size:11px}.sidebar-bottom small{display:block;color:#829b91;margin-top:4px;font-size:10px}.status-dot{width:7px;height:7px;border-radius:50%;background:var(--lime);margin-top:4px;box-shadow:0 0 0 4px #c9ef6920}.content{padding:42px clamp(25px,5vw,76px) 25px;max-width:1600px;width:100%;margin:auto}.topbar{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:47px}.topbar h2{font-size:clamp(25px,3vw,39px);letter-spacing:-.05em;margin-top:10px}.text-button{border:0;background:none;color:var(--teal);font-size:12px;font-weight:800;padding:5px}.dashboard-grid{display:grid;grid-template-columns:minmax(0,1.38fr) minmax(290px,.62fr);gap:48px}.section-heading{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:25px}.section-heading h3{font-size:25px;letter-spacing:-.05em;margin-top:8px}.live-tag{font:10px 'DM Mono',monospace;color:var(--teal);border:1px solid #b4d9b7;padding:7px 9px}.live-tag i{display:inline-block;width:6px;height:6px;background:var(--orange);border-radius:50%;margin-right:5px;animation:blink 1.5s infinite}@keyframes blink{50%{opacity:.2}}.entry-layout{display:grid;grid-template-columns:1fr .8fr;gap:32px}.fuel-form{display:grid;gap:16px}.field-row{display:grid;grid-template-columns:1fr 1fr;gap:13px}.unit{font:10px 'DM Mono',monospace;font-weight:400;color:#8b9993;margin-left:auto;position:absolute;right:12px;top:37px}.notice{background:#e7eee7;border-left:3px solid var(--lime);padding:12px 14px;display:flex;gap:10px;align-items:flex-start;color:#718078;font-size:10px;line-height:1.5}.notice span{border:1px solid #8da38f;border-radius:50%;font:10px 'DM Mono',monospace;width:15px;height:15px;text-align:center;line-height:14px}.submit-button{margin-top:3px}.animation-stage{background:#dce9dd;min-height:435px;position:relative;overflow:hidden;padding:20px}.stage-label{display:flex;justify-content:space-between;color:#668277}.stage-label span{color:var(--teal)}.tank{position:absolute;right:21px;top:70px;width:68px;height:170px;border:2px solid #9fba9f;border-radius:7px 7px 15px 15px;overflow:hidden;background:#d0dfd1}.tank:before{content:'';position:absolute;top:-9px;left:20px;width:24px;height:10px;border:2px solid #9fba9f;border-bottom:0;border-radius:5px 5px 0 0}.tank-level{position:absolute;bottom:0;width:100%;height:0;background:var(--teal);transition:height 1s ease}.tank-lines{position:absolute;inset:20px 12px;background:linear-gradient(transparent 49%,#ffffff55 50%,transparent 52%);background-size:100% 26px}.tank-title,.tank-capacity{position:absolute;left:0;right:0;text-align:center;z-index:1;font:800 7px 'DM Mono',monospace}.tank-title{top:70px;color:#44675b}.tank-capacity{top:84px;color:#44675b}.tank-level~.tank-lines{z-index:1}.car{position:absolute;left:32px;bottom:88px;width:205px;height:65px}.car-body{position:absolute;inset:17px 0 0;background:var(--teal);border-radius:8px 30px 10px 10px}.car-window{position:absolute;z-index:1;left:51px;top:0;width:86px;height:34px;background:#9fc9ba;clip-path:polygon(14% 100%,29% 0,100% 0,100% 100%)}.wheel{position:absolute;z-index:2;bottom:-12px;width:34px;height:34px;border-radius:50%;background:#203a36;border:8px solid #7a9990}.wheel-a{left:28px}.wheel-b{right:27px}.car-light{position:absolute;z-index:2;right:4px;top:34px;width:7px;height:10px;background:var(--orange);border-radius:2px}.hose{position:absolute;right:76px;top:173px;width:60px;height:103px;border-right:4px solid #527970;border-bottom:4px solid #527970;border-radius:0 0 35px 0;transform:rotate(-12deg)}.nozzle{position:absolute;right:63px;top:151px;width:35px;height:51px;background:#456e65;border-radius:4px 4px 12px 12px;transform:rotate(-23deg);z-index:2}.nozzle:before{content:'';position:absolute;top:-24px;right:8px;width:8px;height:30px;background:#456e65;transform:rotate(38deg)}.nozzle div{position:absolute;left:8px;top:8px;width:19px;height:18px;border:2px solid #b0d6b0;border-radius:50%}.fuel-stream{position:absolute;right:83px;top:181px;height:0;border-left:3px dotted var(--orange);opacity:0;transition:height .8s,opacity .4s}.animation-stage.filling .fuel-stream{height:85px;opacity:1;animation:flow .5s linear infinite}@keyframes flow{to{background-position:0 12px}}.road-line{top:auto;bottom:61px;border-color:#7b9d9055}.animation-message{position:absolute;bottom:17px;left:20px;right:20px;font:10px 'DM Mono',monospace;color:#638077}.history-section{border-left:1px solid var(--line);padding-left:33px}.outline-button{border:1px solid #b7c9bd;background:transparent;color:var(--teal);padding:8px 10px;border-radius:3px;font-size:10px;font-weight:800}.empty-state{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:40px 10px;text-align:center}.empty-icon{font:20px 'DM Mono',monospace;color:#9eb3a5;margin-bottom:12px}.empty-state h4{font-size:13px;margin-bottom:7px}.empty-state p{font-size:11px;color:var(--muted)}.history-list{display:grid;gap:10px}.history-item{border-bottom:1px solid var(--line);padding:14px 0;display:grid;grid-template-columns:1fr auto;gap:6px 15px}.history-item strong{font-size:13px}.history-item small{font:10px 'DM Mono',monospace;color:var(--muted)}.history-item .litres{font-size:13px;font-weight:800;color:var(--teal);text-align:right}.history-item button{grid-column:1/-1;border:0;background:none;color:#8a9991;font-size:10px;text-align:left;padding:0}.toast{position:fixed;right:25px;bottom:25px;background:#203a36;color:#fff;padding:13px 16px;font:11px 'DM Mono',monospace;box-shadow:0 8px 25px #203a3630;transform:translateY(120px);transition:.3s;z-index:5}.toast.show{transform:translateY(0)}footer{border-top:1px solid var(--line);margin-top:55px;padding-top:16px;display:flex;justify-content:space-between;color:#8b9993;font:10px 'DM Mono',monospace}@media(max-width:900px){.login-screen{grid-template-columns:1fr}.login-art{display:none}.login-panel{min-height:100vh;padding:35px 8vw}.login-panel .brand-mark{top:35px}.app-shell{grid-template-columns:1fr}.sidebar{padding:22px 25px;display:block}.sidebar .brand-mark{margin-bottom:20px}.sidebar-label,.sidebar-bottom{display:none}.sidebar nav{display:flex;gap:4px}.sidebar nav a{padding:8px 11px}.content{padding:32px 24px}.dashboard-grid{grid-template-columns:1fr;gap:50px}.history-section{border:0;border-top:1px solid var(--line);padding:35px 0 0}.entry-layout{grid-template-columns:1fr}.animation-stage{min-height:320px}.topbar{margin-bottom:35px}}@media(max-width:480px){.field-row{grid-template-columns:1fr}.content{padding:28px 18px}.topbar h2{font-size:25px}}
+
+
+/* Vehicle overview panel */
+.vehicle-panel {
+  margin-bottom: 28px;
+  padding: 24px;
+  border: 1px solid #e2e8e5;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.vehicle-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 20px;
+  background: #edf8f0;
+  color: #247343;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.vehicle-status .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2c9b59;
+}
+
+.vehicle-identity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.vehicle-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: #f0f4f1;
+  font-size: 30px;
+}
+
+.vehicle-registration {
+  margin: 0 0 5px;
+  font-family: 'DM Mono', monospace;
+  font-size: 24px;
+  font-weight: 500;
+  color: #172b24;
+}
+
+.vehicle-description {
+  margin: 0;
+  color: #718078;
+  font-size: 14px;
+}
+
+.vehicle-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.vehicle-stat {
+  min-width: 0;
+  padding: 16px;
+  border-radius: 12px;
+  background: #f6f8f7;
+}
+
+.vehicle-stat span,
+.vehicle-stat small {
+  display: block;
+  color: #718078;
+  font-size: 12px;
+}
+
+.vehicle-stat strong {
+  display: block;
+  margin: 12px 0 5px;
+  overflow-wrap: anywhere;
+  color: #172b24;
+  font-family: 'DM Mono', monospace;
+  font-size: 20px;
+}
+
+@media (max-width: 900px) {
+  .vehicle-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .vehicle-panel {
+    padding: 16px;
+  }
+
+  .vehicle-registration {
+    font-size: 20px;
+  }
+
+  .vehicle-stat {
+    padding: 12px;
+  }
+
+  .vehicle-stat strong {
+    font-size: 17px;
+  }
+}
