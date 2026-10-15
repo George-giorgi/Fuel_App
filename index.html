@@ -135,7 +135,36 @@
               <div class="field-row"><label>Registration number<input id="regNumber" name="regNumber" placeholder="e.g. AB12 CDE" required></label><label>Fuel type<select id="fuelType" name="fuelType"><option>Diesel</option><option>AdBlue</option><option>Petrol</option></select></label></div>
               <div class="field-row"><label>Driver name<input id="firstName" name="firstName" placeholder="First name" required></label><label>Surname<input id="surname" name="surname" placeholder="Surname" required></label></div>
               <div class="field-row"><label>Mileage <span class="unit">km</span><input id="mileage" name="mileage" type="number" min="0" placeholder="Current odometer" required></label><label>Tank capacity <span class="unit">litres</span><input id="capacity" name="capacity" type="number" min="1" step="0.1" placeholder="Tank size" required></label></div>
-              <div class="field-row"><label>Litres added <span class="unit">litres</span><input id="litres" name="litres" type="number" min="0.1" step="0.1" placeholder="Amount filled" required></label><label>Cost <span class="unit">optional</span><input id="cost" name="cost" type="number" min="0" step="0.01" placeholder="0.00"></label></div>
+              
+<div class="field-row">
+  <label>
+    New cumulative meter reading
+    <span class="unit">litres</span>
+    <input
+      id="newCumulativeReading"
+      name="newCumulativeReading"
+      type="number"
+      min="0"
+      step="0.01"
+      placeholder="e.g. 25612.75"
+      required
+    >
+  </label>
+
+  <label>
+    Cost
+    <span class="unit">optional</span>
+    <input
+      id="cost"
+      name="cost"
+      type="number"
+      min="0"
+      step="0.01"
+      placeholder="0.00"
+    >
+  </label>
+</div>
+
               <div class="notice"><span>i</span><p>Date and time are captured automatically when you submit this report.</p></div>
               <button class="primary-button submit-button" type="submit">Save fill report <span>-></span></button>
             </form>

@@ -422,6 +422,58 @@ app.get('/api/dashboard', requireSession, async (req, res) => {
 });
 
 
+app.get('/api/fuel-transactions', requireSession, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('fuel_transactions')
+      .select(`
+        id,
+        vehicle_mileage,
+        previous_cumulative_reading,
+        new_cumulative_reading,
+        litres_added,
+        verification_status,
+        created_at,
+        employees (
+          first_name,
+          surname
+        )
+      `)
+      .eq('vehicle_id', req.vehicle.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) {
+      console.error('Fuel history query failed:', error.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Could not load fuel history.'
+      });
+    }
+
+    return res.json({
+      success: true,
+      transactions: (data || []).map((item) => ({
+        id: item.id,
+        mileage: item.vehicle_mileage,
+        previousReading: item.previous_cumulative_reading,
+        newReading: item.new_cumulative_reading,
+        litresAdded: item.litres_added,
+        status: item.verification_status,
+        createdAt: item.created_at,
+        firstName: item.employees?.first_name || '',
+        surname: item.employees?.surname || ''
+      }))
+    });
+  } catch (error) {
+    console.error('Fuel history error:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Could not load fuel history.'
+    });
+  }
+});
+
 
 app.get('/api/session', async (req, res) => {
   try {
@@ -537,6 +589,88 @@ app.post('/api/logout', async (req, res) => {
     return res.status(500).json({ error: 'Logout could not be completed.' });
   }
 });
+
+
+app.post('/api/fuel-transactions', requireSession, async (req, res) => {
+  try {
+    const rawReading = req.body?.newCumulativeReading;
+    const rawMileage = req.body?.vehicleMileage;
+
+    // Accept decimal readings with up to two decimal places.
+    const readingText =
+      typeof rawReading === 'number' || typeof rawReading === 'string'
+        ? String(rawReading).trim()
+        : '';
+
+    if (!/^\d{1,10}(\.\d{1,2})?$/.test(readingText)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Enter a valid meter reading with up to two decimal places.'
+      });
+    }
+
+    const newReading = Number(readingText);
+
+    if (!Number.isSafeInteger(Number(rawMileage)) ||
+        !Number.isInteger(Number(rawMileage)) ||
+        Number(rawMileage) < 0 ||
+        String(rawMileage).trim() === '') {
+      return res.status(400).json({
+        success: false,
+        error: 'Enter a valid whole-number vehicle mileage.'
+      });
+    }
+
+    const { data, error } = await supabase.rpc(
+      'record_fuel_transaction',
+      {
+        p_employee_id: req.employee.id,
+        p_vehicle_id: req.vehicle.id,
+        p_vehicle_mileage: Number(rawMileage),
+        p_new_cumulative_reading: newReading,
+        p_meter_photo_path: null
+      }
+    );
+
+    if (error) {
+      console.error('Fuel transaction failed:', error.message);
+
+      return res.status(400).json({
+        success: false,
+        error: error.message.includes('New reading must be greater')
+          ? 'The new reading must be greater than the previous meter reading.'
+          : 'The fuel transaction could not be saved. Check the reading and try again.'
+      });
+    }
+
+    const transaction = data?.[0];
+
+    if (!transaction) {
+      return res.status(500).json({
+        success: false,
+        error: 'The transaction was not returned by the database.'
+      });
+    }
+
+    return res.status(201).json({
+      success: true,
+      transaction: {
+        id: transaction.transaction_id,
+        previousReading: transaction.previous_reading,
+        newReading: transaction.new_reading,
+        litresAdded: transaction.litres_added
+      }
+    });
+  } catch (error) {
+    console.error('Unexpected fuel transaction error:', error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: 'An unexpected error occurred while saving the transaction.'
+    });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`Diesel Desk API running on http://localhost:${PORT}`);

@@ -28,17 +28,55 @@ function saveRecords() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 }
 
+
 function renderHistory() {
   emptyState.classList.toggle('hidden', records.length > 0);
+
   historyList.innerHTML = records.map((record) => `
     <article class="history-item">
-      <div><strong>${escapeHtml(record.regNumber)}</strong><small>${escapeHtml(record.firstName)} ${escapeHtml(record.surname)} / ${formatDate(record.createdAt)}</small></div>
-      <div class="litres">${record.litres} L</div>
-      <button type="button" data-download="${record.id}">Download report .json</button>
+      <div>
+        <strong>${escapeHtml(document.getElementById('regNumber').value)}</strong>
+        <small>
+          ${escapeHtml(record.firstName)} ${escapeHtml(record.surname)}
+          / ${formatDate(record.createdAt)}
+        </small>
+        <small>
+          Meter: ${Number(record.previousReading).toFixed(2)}
+          → ${Number(record.newReading).toFixed(2)}
+        </small>
+        <small>
+          Mileage: ${Number(record.mileage).toLocaleString('en-IE')} km
+          / Status: ${escapeHtml(record.status)}
+        </small>
+      </div>
+      <div class="litres">
+        ${Number(record.litresAdded).toFixed(2)} L
+      </div>
     </article>
   `).join('');
-  recordCount.textContent = `${records.length} record${records.length === 1 ? '' : 's'}`;
+
+  recordCount.textContent =
+    `${records.length} record${records.length === 1 ? '' : 's'}`;
 }
+
+
+async function loadFuelHistory() {
+  const response = await fetch('/api/fuel-transactions', {
+    method: 'GET',
+    credentials: 'same-origin'
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || 'Could not load fuel history.');
+  }
+
+  records = result.transactions;
+  renderHistory();
+}
+
+
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
@@ -171,7 +209,11 @@ document.getElementById('vehicleMileage').textContent =
     loginScreen.classList.add('hidden');
     appScreen.classList.remove('hidden');
 
-    renderHistory();
+    try {
+  await loadFuelHistory();
+} catch (error) {
+  showToast(error.message || 'Could not load fuel history.');
+}renderHistory();
   } catch (error) {
     loginError.textContent = error.message;
     loginError.classList.remove('hidden');
@@ -229,13 +271,101 @@ document.getElementById('logoutButton').addEventListener('click', async () => {
 
 
 
-fuelForm.addEventListener('submit', (event) => {
+
+
+fuelForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
-  showToast(
-    'Fuel submissions are temporarily disabled while we connect database saving.'
-  );
+  const submitButton = fuelForm.querySelector('button[type="submit"]');
+  const readingInput = document.getElementById('newCumulativeReading');
+  const mileageInput = document.getElementById('mileage');
+
+  const readingText = readingInput.value.trim();
+  const mileageText = mileageInput.value.trim();
+  const mileage = Number(mileageText);
+  const newCumulativeReading = Number(readingText);
+
+  if (!/^\d{1,10}(\.\d{1,2})?$/.test(readingText)) {
+    showToast('Enter a meter reading with up to 2 decimal places.');
+    return;
+  }
+
+  if (
+    mileageText === '' ||
+    !Number.isSafeInteger(mileage) ||
+    mileage < 0
+  ) {
+    showToast('Enter a valid whole-number vehicle mileage.');
+    return;
+  }
+
+  submitButton.disabled = true;
+  submitButton.textContent = 'Saving...';
+
+  try {
+    const response = await fetch('/api/fuel-transactions', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        newCumulativeReading,
+        vehicleMileage: mileage
+      })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(
+        result.error || 'Could not save the fuel transaction.'
+      );
+    }
+
+    const transaction = result.transaction;
+
+    document.getElementById('vehicleCumulative').textContent =
+      Number(transaction.newReading).toFixed(2);
+
+    document.getElementById('vehicleLastFill').textContent =
+      Number(transaction.litresAdded).toFixed(2);
+
+    document.getElementById('vehicleMileage').textContent =
+      mileage.toLocaleString('en-IE');
+    
+    
+await loadFuelHistory();
+
+
+    // Refresh the animation.
+    const capacity = Number(
+      document.getElementById('capacity').value
+    );
+
+    const litresAdded = Number(transaction.litresAdded);
+    const percent = capacity > 0
+      ? Math.min(100, (litresAdded / capacity) * 100)
+      : 0;
+
+    animationStage.classList.add('filling');
+    tankLevel.style.height = `${percent}%`;
+    fillPercent.textContent = `${Math.round(percent)}%`;
+    animationMessage.textContent =
+      `Recorded ${litresAdded.toFixed(2)} litres`;
+
+    readingInput.value = '';
+
+    showToast(
+      `Fuel record saved: ${litresAdded.toFixed(2)} litres.`
+    );
+  } catch (error) {
+    showToast(error.message || 'Fuel submission failed.');
+  } finally {
+    submitButton.disabled = false;
+    submitButton.innerHTML = 'Save fill report <span>-></span>';
+  }
 });
+
+
 
 
 document.getElementById('exportButton').addEventListener('click', () => {
@@ -257,4 +387,4 @@ historyList.addEventListener('click', (event) => {
   if (id) downloadReport(records.find((record) => record.id === id));
 });
 
-renderHistory();
+
