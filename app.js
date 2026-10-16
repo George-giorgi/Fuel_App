@@ -1,7 +1,73 @@
-const STORAGE_KEY = 'diesel-desk-records';
 const loginScreen = document.getElementById('loginScreen');
 const appScreen = document.getElementById('appScreen');
 const fuelForm = document.getElementById('fuelForm');
+
+const meterPhotoInput = document.getElementById('meterPhotoInput');
+const tabletCameraButton = document.getElementById('tabletCameraButton');
+const retakePhotoButton = document.getElementById('retakePhotoButton');
+const photoPreviewPanel = document.getElementById('photoPreviewPanel');
+const meterPhotoPreview = document.getElementById('meterPhotoPreview');
+const photoStatus = document.getElementById('photoStatus');
+const phoneQrButton = document.getElementById('phoneQrButton');
+const phoneQrStatus = document.getElementById('phoneQrStatus');
+
+let selectedMeterPhoto = null;
+let meterPhotoPreviewUrl = null;
+
+function clearMeterPhoto() {
+  selectedMeterPhoto = null;
+  meterPhotoInput.value = '';
+
+  if (meterPhotoPreviewUrl) {
+    URL.revokeObjectURL(meterPhotoPreviewUrl);
+    meterPhotoPreviewUrl = null;
+  }
+
+  meterPhotoPreview.removeAttribute('src');
+  photoPreviewPanel.classList.add('hidden');
+  photoStatus.textContent = 'Check that the meter display is readable.';
+}
+
+tabletCameraButton.addEventListener('click', () => {
+  meterPhotoInput.click();
+});
+
+meterPhotoInput.addEventListener('change', () => {
+  const file = meterPhotoInput.files?.[0];
+
+  if (!file) return;
+
+  if (!file.type.startsWith('image/')) {
+    clearMeterPhoto();
+    showToast('Please select an image.');
+    return;
+  }
+
+  // Release the previous preview URL, if there was one.
+  if (meterPhotoPreviewUrl) {
+    URL.revokeObjectURL(meterPhotoPreviewUrl);
+  }
+
+  selectedMeterPhoto = file;
+  meterPhotoPreviewUrl = URL.createObjectURL(file);
+  meterPhotoPreview.src = meterPhotoPreviewUrl;
+  photoPreviewPanel.classList.remove('hidden');
+  photoStatus.textContent =
+    'Photo selected. Check both meter rows before continuing.';
+});
+
+retakePhotoButton.addEventListener('click', () => {
+  clearMeterPhoto();
+  meterPhotoInput.click();
+});
+
+phoneQrButton.addEventListener('click', () => {
+  phoneQrStatus.textContent =
+    'Phone QR sessions are not connected yet. Use the tablet camera for this test.';
+});
+
+fuelForm.addEventListener('reset', clearMeterPhoto);
+
 const historyList = document.getElementById('historyList');
 const emptyState = document.getElementById('emptyState');
 const recordCount = document.getElementById('recordCount');
@@ -23,11 +89,6 @@ function showToast(message) {
 function formatDate(value) {
   return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
-
-function saveRecords() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
-}
-
 
 function renderHistory() {
   emptyState.classList.toggle('hidden', records.length > 0);
@@ -61,19 +122,29 @@ function renderHistory() {
 
 
 async function loadFuelHistory() {
-  const response = await fetch('/api/fuel-transactions', {
-    method: 'GET',
-    credentials: 'same-origin'
-  });
+  records = [];
+  emptyState.classList.add('hidden');
+  recordCount.textContent = '0 records';
+  historyList.innerHTML = '<p class="history-message">Loading fuel history...</p>';
 
-  const result = await response.json();
+  try {
+    const response = await fetch('/api/fuel-transactions', {
+      method: 'GET',
+      credentials: 'same-origin'
+    });
 
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || 'Could not load fuel history.');
+    const result = await response.json();
+
+    if (!response.ok || !result.success) {
+      throw new Error(result.error || 'Could not load fuel history.');
+    }
+
+    records = result.transactions;
+    renderHistory();
+  } catch (error) {
+    historyList.innerHTML = `<p class="history-message">${escapeHtml(error.message || 'Could not load fuel history.')}</p>`;
+    throw error;
   }
-
-  records = result.transactions;
-  renderHistory();
 }
 
 
@@ -225,10 +296,10 @@ document.getElementById('vehicleMileage').textContent =
     appScreen.classList.remove('hidden');
 
     try {
-  await loadFuelHistory();
-} catch (error) {
-  showToast(error.message || 'Could not load fuel history.');
-}renderHistory();
+      await loadFuelHistory();
+    } catch (error) {
+      showToast(error.message || 'Could not load fuel history.');
+    }
   } catch (error) {
     loginError.textContent = error.message;
     loginError.classList.remove('hidden');
@@ -259,6 +330,8 @@ document.getElementById('logoutButton').addEventListener('click', async () => {
 
     // Clear employee and vehicle details from the screen.
     fuelForm.reset();
+    records = [];
+    renderHistory();
     document.getElementById('regNumber').readOnly = false;
     document.getElementById('firstName').readOnly = false;
     document.getElementById('surname').readOnly = false;
@@ -291,97 +364,14 @@ document.querySelector('.dashboard-grid').classList.remove('hidden');
 
 
 
-fuelForm.addEventListener('submit', async (event) => {
+
+fuelForm.addEventListener('submit', (event) => {
   event.preventDefault();
-
-  const submitButton = fuelForm.querySelector('button[type="submit"]');
-  const readingInput = document.getElementById('newCumulativeReading');
-  const mileageInput = document.getElementById('mileage');
-
-  const readingText = readingInput.value.trim();
-  const mileageText = mileageInput.value.trim();
-  const mileage = Number(mileageText);
-  const newCumulativeReading = Number(readingText);
-
-  if (!/^\d{1,10}(\.\d{1,2})?$/.test(readingText)) {
-    showToast('Enter a meter reading with up to 2 decimal places.');
-    return;
-  }
-
-  if (
-    mileageText === '' ||
-    !Number.isSafeInteger(mileage) ||
-    mileage < 0
-  ) {
-    showToast('Enter a valid whole-number vehicle mileage.');
-    return;
-  }
-
-  submitButton.disabled = true;
-  submitButton.textContent = 'Saving...';
-
-  try {
-    const response = await fetch('/api/fuel-transactions', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        newCumulativeReading,
-        vehicleMileage: mileage
-      })
-    });
-
-    const result = await response.json();
-
-    if (!response.ok || !result.success) {
-      throw new Error(
-        result.error || 'Could not save the fuel transaction.'
-      );
-    }
-
-    const transaction = result.transaction;
-
-    document.getElementById('vehicleCumulative').textContent =
-      Number(transaction.newReading).toFixed(2);
-
-    document.getElementById('vehicleLastFill').textContent =
-      Number(transaction.litresAdded).toFixed(2);
-
-    document.getElementById('vehicleMileage').textContent =
-      mileage.toLocaleString('en-IE');
-    
-    
-await loadFuelHistory();
-
-
-    // Refresh the animation.
-    const capacity = Number(
-      document.getElementById('capacity').value
-    );
-
-    const litresAdded = Number(transaction.litresAdded);
-    const percent = capacity > 0
-      ? Math.min(100, (litresAdded / capacity) * 100)
-      : 0;
-
-    animationStage.classList.add('filling');
-    tankLevel.style.height = `${percent}%`;
-    fillPercent.textContent = `${Math.round(percent)}%`;
-    animationMessage.textContent =
-      `Recorded ${litresAdded.toFixed(2)} litres`;
-
-    readingInput.value = '';
-
-    showToast(
-      `Fuel record saved: ${litresAdded.toFixed(2)} litres.`
-    );
-  } catch (error) {
-    showToast(error.message || 'Fuel submission failed.');
-  } finally {
-    submitButton.disabled = false;
-    submitButton.innerHTML = 'Save fill report <span>-></span>';
-  }
+  showToast(
+    'Fuel submission is disabled until photo verification is implemented.'
+  );
 });
+
 
 
 

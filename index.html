@@ -12,7 +12,9 @@
 <body>
   <div id="loginScreen" class="login-screen">
     <div class="login-panel">
-      <div class="brand-mark"><span class="brand-pulse"></span> DIESEL DESK</div>
+      <div class="brand-mark">
+        <img class="brand-logo brand-logo--login" src="./brusna_final_logo.jpg" alt="Brusna - The Retrofit Specialists">
+      </div>
       <p class="eyebrow">FLEET OPERATIONS / 01</p>
       <h1>Every fill,<br><em>accounted for.</em></h1>
       <p class="login-copy">A clear, fast logbook for the vehicles that keep everything moving.</p>
@@ -58,7 +60,6 @@
   Sign in with your assigned vehicle registration and personal PIN.
 </p>
 
-      <p class="demo-note">Demo access: manager@dieseldesk.local / diesel123</p>
     </div>
     <div class="login-art" aria-hidden="true">
       <div class="art-grid"></div>
@@ -70,7 +71,9 @@
 
   <main id="appScreen" class="app-shell hidden">
     <aside class="sidebar">
-      <div class="brand-mark"><span class="brand-pulse"></span> DIESEL DESK</div>
+      <div class="brand-mark">
+        <img class="brand-logo" src="./brusna_final_logo.jpg" alt="Brusna - The Retrofit Specialists">
+      </div>
       <div class="sidebar-label">WORKSPACE</div>
       
 
@@ -90,7 +93,7 @@
 </nav>
 
 
-      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>System online</strong><small>Records save locally</small></div></div>
+      <div class="sidebar-bottom"><div class="status-dot"></div><div><strong>Shared fleet database</strong><small>Vehicle history is account-scoped</small></div></div>
     </aside>
 
     <section class="content">
@@ -148,43 +151,126 @@
         <section id="newFill" class="entry-section">
           <div class="section-heading"><div><p class="eyebrow">NEW ENTRY</p><h3>Record a fill</h3></div><span class="live-tag"><i></i> LIVE</span></div>
           <div class="entry-layout">
-            <form id="fuelForm" class="fuel-form">
-              <div class="field-row"><label>Registration number<input id="regNumber" name="regNumber" placeholder="e.g. AB12 CDE" required></label><label>Fuel type<select id="fuelType" name="fuelType"><option>Diesel</option><option>AdBlue</option><option>Petrol</option></select></label></div>
-              <div class="field-row"><label>Driver name<input id="firstName" name="firstName" placeholder="First name" required></label><label>Surname<input id="surname" name="surname" placeholder="Surname" required></label></div>
-              <div class="field-row"><label>Mileage <span class="unit">km</span><input id="mileage" name="mileage" type="number" min="0" placeholder="Current odometer" required></label><label>Tank capacity <span class="unit">litres</span><input id="capacity" name="capacity" type="number" min="1" step="0.1" placeholder="Tank size" required></label></div>
-              
-<div class="field-row">
-  <label>
-    New cumulative meter reading
-    <span class="unit">litres</span>
-    <input
-      id="newCumulativeReading"
-      name="newCumulativeReading"
-      type="number"
-      min="0"
-      step="0.01"
-      placeholder="e.g. 25612.75"
-      required
-    >
-  </label>
+            
+<form id="fuelForm" class="fuel-form">
+  <div class="automatic-details">
+    <p class="eyebrow">AUTOMATICALLY IDENTIFIED</p>
 
-  <label>
-    Cost
-    <span class="unit">optional</span>
-    <input
-      id="cost"
-      name="cost"
-      type="number"
-      min="0"
-      step="0.01"
-      placeholder="0.00"
-    >
-  </label>
-</div>
+    <div class="field-row">
+      <label>
+        Vehicle registration
+        <input id="regNumber" name="regNumber" readonly required>
+      </label>
+      <label>
+        Driver name
+        <input id="firstName" name="firstName" readonly required>
+      </label>
+    </div>
 
-              <div class="notice"><span>i</span><p>Date and time are captured automatically when you submit this report.</p></div>
-              <button class="primary-button submit-button" type="submit">Save fill report <span>-></span></button>
-            </form>
+    <div class="field-row">
+      <label>
+        Surname
+        <input id="surname" name="surname" readonly required>
+      </label>
+      <label>
+        Tank capacity
+        <span class="unit">litres</span>
+        <input id="capacity" name="capacity" type="number" readonly required>
+      </label>
+    </div>
+
+    <p class="notice">
+      Vehicle and employee details come from your Diesel Desk login.
+    </p>
+  </div>
+
+  <div class="mileage-section">
+    <label for="mileage">
+      Current vehicle mileage
+      <span class="unit">km</span>
+      <input
+        id="mileage"
+        name="mileage"
+        type="number"
+        min="0"
+        step="1"
+        placeholder="Enter current odometer reading"
+        required
+      >
+    </label>
+  </div>
+
+  <section class="photo-capture">
+    <p class="eyebrow">METER EVIDENCE</p>
+    <h3>Photograph the fuel meter</h3>
+    <p>Make sure both meter rows are clear and readable.</p>
+
+    <button
+      id="tabletCameraButton"
+      class="primary-button"
+      type="button"
+    >
+      Take photo on this device <span>→</span>
+    </button>
+
+    <input
+      id="meterPhotoInput"
+      class="hidden"
+      type="file"
+      accept="image/*"
+      capture="environment"
+    >
+
+    <div class="phone-option">
+      <h4>Using your own phone?</h4>
+      <p>Scan a session-specific QR code to take the photo on your phone.</p>
+      <button
+        id="phoneQrButton"
+        class="outline-button"
+        type="button"
+      >
+        Use phone via QR code
+      </button>
+      <p id="phoneQrStatus" class="photo-status" role="status">
+        Phone connection will be enabled in the next step.
+      </p>
+    </div>
+
+    <div id="photoPreviewPanel" class="photo-preview hidden">
+      <img id="meterPhotoPreview" alt="Preview of the fuel meter photo">
+
+      <p id="photoStatus" class="photo-status" role="status">
+        Check that the meter display is readable.
+      </p>
+
+      <button
+        id="retakePhotoButton"
+        class="outline-button"
+        type="button"
+      >
+        Retake photo
+      </button>
+    </div>
+  </section>
+
+  <div class="notice">
+    <span>i</span>
+    <p>
+      Fuel readings will be extracted from the photo in the next stage.
+      Do not submit a fuel transaction until photo verification is enabled.
+    </p>
+  </div>
+
+  <button
+    id="saveFuelButton"
+    class="primary-button submit-button"
+    type="submit"
+    disabled
+  >
+    Fuel submission not yet enabled
+  </button>
+</form>
+
             <div class="animation-stage" aria-label="Animated diesel filling illustration">
               <div class="stage-label">FILLING STATUS <span id="fillPercent">0%</span></div>
               <div class="tank"><div id="tankLevel" class="tank-level"></div><div class="tank-lines"></div><span class="tank-title">DIESEL</span><span class="tank-capacity">CAPACITY</span></div>
@@ -197,9 +283,9 @@
         </section>
 
         <section id="history" class="history-section">
-          <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Filling actions</h3></div><button id="exportButton" class="outline-button" type="button">Export all <span>↓</span></button></div>
+          <div class="section-heading"><div><p class="eyebrow">RECENT ACTIVITY</p><h3>Filling actions</h3></div><button id="exportButton" class="outline-button" type="button">Export latest 50 <span>↓</span></button></div>
           <div id="emptyState" class="empty-state"><div class="empty-icon">--</div><h4>No fills recorded yet</h4><p>Your saved fuel reports will appear here.</p></div>
-          <div id="historyList" class="history-list"></div>
+          <div id="historyList" class="history-list" role="status" aria-live="polite"></div>
         </section>
       </div>
       

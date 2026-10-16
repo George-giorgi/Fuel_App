@@ -114,3 +114,165 @@
     font-size: 17px;
   }
 }
+
+
+/* Diesel Desk meter photo workflow */
+.automatic-details,
+.mileage-section,
+.photo-capture {
+  display: grid;
+  gap: 16px;
+}
+
+.photo-capture {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.photo-capture h3 {
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+
+.photo-capture > p:not(.eyebrow),
+.phone-option p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.phone-option {
+  display: grid;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.phone-option h4 {
+  font-size: 13px;
+}
+
+.photo-preview {
+  display: grid;
+  gap: 12px;
+}
+
+.photo-preview img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  background: #edf1ed;
+  border-radius: 5px;
+}
+
+.photo-status {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+#saveFuelButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+}
+
+@media (max-width: 480px) {
+  .photo-capture {
+    padding: 15px;
+  }
+
+  .photo-capture .primary-button,
+  .photo-capture .outline-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+.history-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--white);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.login-panel .brand-mark {
+  position: static;
+  top: auto;
+  width: min(100%, 410px);
+  margin: 0 0 42px;
+}
+
+.brand-logo--login {
+  mix-blend-mode: multiply;
+}
+
+.sidebar .brand-mark {
+  width: 100%;
+  max-width: 238px;
+  margin: 0 0 58px;
+  padding: 8px;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.login-panel h1 {
+  color: #142238;
+  letter-spacing: 0;
+}
+
+.login-panel h1 em {
+  color: #177650;
+}
+
+@media (min-width: 901px) {
+  .login-panel {
+    padding-inline: clamp(40px, 6vw, 90px);
+  }
+
+  .login-panel h1 {
+    font-size: clamp(48px, 4.2vw, 62px);
+  }
+}
+
+@media (max-width: 900px) {
+  .login-panel {
+    justify-content: flex-start;
+    padding-top: 36px;
+  }
+
+  .login-panel .brand-mark {
+    margin-bottom: 32px;
+  }
+
+  .sidebar .brand-mark {
+    max-width: 210px;
+    margin-bottom: 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-panel .brand-mark {
+    width: min(100%, 340px);
+    margin-bottom: 28px;
+  }
+
+  .login-panel h1 {
+    font-size: 42px;
+  }
+}
