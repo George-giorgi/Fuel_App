@@ -32,6 +32,8 @@ services:
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
       - key: FUEL_OCR_PROVIDER
-        value: tesseract
+        value: google_vision
+      - key: GOOGLE_CLOUD_VISION_API_KEY
+        sync: false
       - key: TESSERACT_CMD
         value: /usr/bin/tesseract

@@ -18,7 +18,7 @@ class AdminEmployeeNotFound(LookupError):
 def list_admin_employees(session: Session) -> list[Employee]:
     return list(
         session.scalars(
-            select(Employee).order_by(Employee.name.collate("NOCASE"), Employee.id)
+            select(Employee).order_by(func.lower(Employee.name), Employee.id)
         ).all()
     )
 

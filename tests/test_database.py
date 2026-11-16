@@ -132,6 +132,7 @@ from backend.app.services.admin_dashboard import (
     AdminEmployeeNotFound,
     InvalidAdminDateRange,
     get_admin_fuel_summary,
+    list_admin_employees,
     list_employee_fuel_records,
 )
 from backend.app.services.vehicles import (
@@ -153,6 +154,21 @@ class DatabaseTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.engine.dispose()
+
+    def test_list_admin_employees_orders_case_insensitively(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            create_employee(session, "zoe@example.com", "zoe", "password123456")
+            create_employee(session, "alice@example.com", "Alice", "password123456")
+            create_employee(session, "bob@example.com", "bob", "password123456")
+
+        with Session(self.engine) as session:
+            employees = list_admin_employees(session)
+
+        self.assertEqual([employee.name for employee in employees], [
+            "Alice",
+            "bob",
+            "zoe",
+        ])
 
     def _create_verified_meter_photo(
         self,
@@ -1194,6 +1210,17 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertEqual(api_error.status, "failed")
         self.assertIn("API key invalid", api_error.message)
+
+    def test_production_defaults_to_google_vision(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"FUEL_ENV": "production", "GOOGLE_CLOUD_VISION_API_KEY": ""},
+            clear=True,
+        ):
+            result = extract_meter_readings(b"test-image")
+
+        self.assertEqual(result.status, "unavailable")
+        self.assertIn("Google Vision is selected", result.message)
 
     def test_fuel_submission_uses_fill_and_compares_cumulative_reading(self) -> None:
         with Session(self.engine) as session, session.begin():

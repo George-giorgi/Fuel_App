@@ -422,7 +422,12 @@ def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
 
 
 def extract_meter_readings(content: bytes) -> MeterOcrResult:
-    provider = os.environ.get("FUEL_OCR_PROVIDER", "tesseract").strip().lower()
+    default_provider = (
+        "google_vision"
+        if os.environ.get("FUEL_ENV", "").strip().lower() == "production"
+        else "tesseract"
+    )
+    provider = os.environ.get("FUEL_OCR_PROVIDER", default_provider).strip().lower()
     if provider == "google_vision":
         api_key = os.environ.get("GOOGLE_CLOUD_VISION_API_KEY", "").strip()
         if not api_key:

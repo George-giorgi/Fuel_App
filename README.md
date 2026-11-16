@@ -113,8 +113,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   pass through authenticated API endpoints. Do not configure an object
   lifecycle rule that deletes fuel photos.
 - **Secrets:** put database credentials, R2 credentials, `FUEL_AUTH_SECRET`,
-  and any optional Google Vision key only in Render's backend environment.
-  Never prefix a secret with `VITE_`. Pages needs only `API_ORIGIN`.
+  and `GOOGLE_CLOUD_VISION_API_KEY` only in Render's backend environment.
+  Production OCR is configured to use Google Cloud Vision; add a restricted
+  Vision API key in Render before deploying. Never prefix a secret with `VITE_`.
+  Pages needs only `API_ORIGIN`.
 - **Administrator:** after Render has applied migrations, bootstrap the first
   admin once from a trusted local shell using the production Neon URL and the
   existing `python -m backend.app.cli bootstrap-admin` command. It prompts for
@@ -269,9 +271,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
   the extracted values and confirm they match the sheet; they cannot type or
   change readings. Missing, low-confidence, or unavailable OCR blocks verification
   and transaction submission.
-- Local Tesseract OCR is the default. To use Google Cloud Vision's handwriting
-  capable `DOCUMENT_TEXT_DETECTION`, set these variables in the backend
-  environment and restart FastAPI:
+- Production is configured to use Google Cloud Vision's handwriting-capable
+  `DOCUMENT_TEXT_DETECTION`; the Render blueprint sets
+  `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
+  secret in the Render backend environment. Local development defaults to
+  Tesseract; to use Google Vision locally, set:
 
   ```bash
   export FUEL_OCR_PROVIDER=google_vision
@@ -283,7 +287,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Google for OCR. Google lists the first 1,000 Vision text/document-text
   detection units per month as free; review the [current pricing](https://cloud.google.com/vision/pricing),
   enable quota/billing alerts, and get approval before sending company photos.
-  Without `FUEL_OCR_PROVIDER=google_vision`, OCR remains local and uses Tesseract.
+  When `FUEL_ENV=production` and no provider is explicitly set, the backend
+  defaults to Google Vision. If the key is missing, OCR reports that Vision is
+  unavailable instead of silently falling back to local Tesseract.
 - Install Tesseract only when using the local provider (for macOS, use
   `brew install tesseract` or `sudo port install tesseract tesseract-eng`).
   Install Python dependencies with `python -m pip install -r requirements.txt`.
