@@ -276,7 +276,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   locates and rectifies the green LCD area, crops its two rows separately, and
   uses OpenCV to classify seven-segment digits. Current Fill keeps its decimal
   reading; Cumulative Total uses the bottom row's digits in order and ignores
-  its decimal point, returning a whole-number litre reading. Google Cloud Vision
+  its decimal point, returning a whole-number litre reading. The bottom-row
+  recognizer also checks locally adaptive grayscale masks for lighting/color
+  variation and requires six digits with matching mask results; otherwise it
+  asks for manual review. Google Cloud Vision
   remains the primary production OCR provider; the backend requests both
   `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses their text/bounds as
   additional evidence, and compares Vision digits with the independent segment

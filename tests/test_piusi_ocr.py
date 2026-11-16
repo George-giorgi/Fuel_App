@@ -4,6 +4,7 @@ from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -21,6 +22,7 @@ from backend.app.services.meter_ocr import (
 from backend.app.services.piusi_lcd import (
     recognize_piusi_lcd,
 )
+from backend.app.services import piusi_lcd
 
 
 DATASET = Path(__file__).parent / "datasets" / "piusi_k600_3"
@@ -75,6 +77,26 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(reconciled.cumulative_total_litres, 261563)
         self.assertIn("current-fill decimal point", reconciled.message)
         self.assertNotIn("cumulative-total decimal point", reconciled.message)
+
+    def test_cumulative_row_uses_adaptive_threshold_when_color_is_absent(self) -> None:
+        image = piusi_lcd._load_oriented_image(REFERENCE.read_bytes())
+        display = piusi_lcd._lcd_candidate(image)
+        self.assertIsNotNone(display)
+        assert display is not None
+        height, width = display.shape[:2]
+        top, bottom = round(height * 0.65), round(height * 0.96)
+        left, right = round(width * 0.15), round(width * 0.95)
+        row = display[top:bottom, left:right]
+        gray = cv2.cvtColor(row, cv2.COLOR_BGR2GRAY)
+        display[top:bottom, left:right] = cv2.cvtColor(
+            gray, cv2.COLOR_GRAY2BGR
+        )
+
+        with patch.object(piusi_lcd, "_lcd_candidate", return_value=display):
+            result = recognize_piusi_lcd(REFERENCE.read_bytes())
+
+        self.assertEqual(result.cumulative_total.raw_digits, "261563")
+        self.assertEqual(result.cumulative_total.value, 261563)
 
     def test_cumulative_row_uses_all_digits_ignoring_decimal_position(self) -> None:
         lcd = recognize_piusi_lcd(REFERENCE.read_bytes())

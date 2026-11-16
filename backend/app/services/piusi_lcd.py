@@ -319,60 +319,101 @@ def _recognize_row(
         return LcdRowReading(None, None, None, None)
 
     hsv = cv2.cvtColor(row, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, _SEGMENT_HSV_LOW, _SEGMENT_HSV_HIGH)
-    boxes = _group_components(
-        mask, x1, y1, minimum_area=max(18, round(row.size * 0.0007))
-    )
     row_height = y2 - y1
-    if split_wide_glyphs:
-        boxes = _split_wide_glyphs(boxes)
-    boxes = [
-        box
-        for box in boxes
-        if box[3] >= row_height * 0.38
-        and 0.12 <= box[2] / max(box[3], 1) <= 1.05
-        and box[0] + box[2] <= x2
-    ]
-    boxes.sort(key=lambda box: box[0])
-    classified = [
-        _classify_glyph(
-            mask,
-            box,
-            x1,
-            y1,
-            segment_threshold,
-            force_narrow_one=not whole_number,
-        )
-        for box in boxes
-    ]
-    if (
-        len(classified) < minimum_digits
-        or any(digit is None for digit, _ in classified)
-        or (
-            whole_number
-            and any(score < 0.65 for _, score in classified)
-        )
-    ):
-        return LcdRowReading(None, None, None, None)
 
-    raw_digits = "".join(digit for digit, _ in classified if digit is not None)
-    confidence = sum(score for _, score in classified) / len(classified)
-    decimal_position = (
-        None
-        if whole_number
-        else _decimal_position(mask, boxes, x1, y1, row_height)
-    )
-    value = None
-    if whole_number:
-        value = int(raw_digits)
-    elif decimal_position is not None and 0 < decimal_position < len(raw_digits):
-        try:
-            value = Decimal(
-                f"{raw_digits[:decimal_position]}.{raw_digits[decimal_position:]}"
+    def recognize_mask(mask: np.ndarray) -> LcdRowReading | None:
+        boxes = _group_components(
+            mask, x1, y1, minimum_area=max(18, round(row.size * 0.0007))
+        )
+        if split_wide_glyphs:
+            boxes = _split_wide_glyphs(boxes)
+        boxes = [
+            box
+            for box in boxes
+            if box[3] >= row_height * 0.38
+            and 0.12 <= box[2] / max(box[3], 1) <= 1.05
+            and box[0] + box[2] <= x2
+        ]
+        boxes.sort(key=lambda box: box[0])
+        classified = [
+            _classify_glyph(
+                mask,
+                box,
+                x1,
+                y1,
+                segment_threshold,
+                force_narrow_one=not whole_number,
             )
-        except InvalidOperation:
-            value = None
-    return LcdRowReading(raw_digits, decimal_position, value, confidence)
+            for box in boxes
+        ]
+        if (
+            len(classified) < minimum_digits
+            or (whole_number and len(classified) != 6)
+            or any(digit is None for digit, _ in classified)
+            or (
+                whole_number
+                and any(score < 0.65 for _, score in classified)
+            )
+        ):
+            return None
+
+        raw_digits = "".join(
+            digit for digit, _ in classified if digit is not None
+        )
+        confidence = sum(score for _, score in classified) / len(classified)
+        decimal_position = (
+            None
+            if whole_number
+            else _decimal_position(mask, boxes, x1, y1, row_height)
+        )
+        value = None
+        if whole_number:
+            value = int(raw_digits)
+        elif decimal_position is not None and 0 < decimal_position < len(raw_digits):
+            try:
+                value = Decimal(
+                    f"{raw_digits[:decimal_position]}.{raw_digits[decimal_position:]}"
+                )
+            except InvalidOperation:
+                value = None
+        return LcdRowReading(raw_digits, decimal_position, value, confidence)
+
+    masks = [cv2.inRange(hsv, _SEGMENT_HSV_LOW, _SEGMENT_HSV_HIGH)]
+    if whole_number:
+        gray = cv2.cvtColor(row, cv2.COLOR_BGR2GRAY)
+        for scale in (0.52, 0.55):
+            block_size = max(15, round(row_height * scale))
+            if block_size % 2 == 0:
+                block_size += 1
+            block_size = min(block_size, min(row.shape[:2]) - 1)
+            if block_size % 2 == 0:
+                block_size -= 1
+            if block_size < 3:
+                continue
+            mask = cv2.adaptiveThreshold(
+                gray,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY_INV,
+                block_size,
+                2,
+            )
+            # The right side contains the TOTAL label and unit, not digits.
+            mask[:, round(mask.shape[1] * 0.71) :] = 0
+            masks.append(mask)
+
+    readings = [
+        reading
+        for mask in masks
+        if (reading := recognize_mask(mask)) is not None
+    ]
+    if whole_number:
+        if len(readings) < 2 or len({r.raw_digits for r in readings}) != 1:
+            return LcdRowReading(None, None, None, None)
+        return max(readings, key=lambda reading: reading.confidence or 0)
+    if not readings:
+        return LcdRowReading(None, None, None, None)
+    return readings[0]
 
 
 def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
