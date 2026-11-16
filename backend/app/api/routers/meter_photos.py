@@ -186,6 +186,8 @@ def confirm_meter_readings(
             session,
             employee,
             meter_photo_id,
+            request.current_fill_litres,
+            request.cumulative_total_litres,
         )
     except InvalidMeterVerification as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -212,6 +214,24 @@ def _meter_photo_read(
         ocr_cumulative_total_litres=meter_photo.ocr_cumulative_total_litres,
         ocr_current_fill_confidence=meter_photo.ocr_current_fill_confidence,
         ocr_cumulative_total_confidence=meter_photo.ocr_cumulative_total_confidence,
+        ocr_provider=meter_photo.ocr_provider,
+        ocr_current_fill_raw_digits=meter_photo.ocr_current_fill_raw_digits,
+        ocr_current_fill_decimal_position=(
+            meter_photo.ocr_current_fill_decimal_position
+        ),
+        ocr_cumulative_total_raw_digits=(
+            meter_photo.ocr_cumulative_total_raw_digits
+        ),
+        ocr_cumulative_total_decimal_position=(
+            meter_photo.ocr_cumulative_total_decimal_position
+        ),
+        ocr_current_fill_segment_confidence=(
+            meter_photo.ocr_current_fill_segment_confidence
+        ),
+        ocr_cumulative_total_segment_confidence=(
+            meter_photo.ocr_cumulative_total_segment_confidence
+        ),
+        ocr_warnings=meter_photo.ocr_warnings,
         current_fill_litres=meter_photo.current_fill_litres,
         cumulative_total_litres=meter_photo.cumulative_total_litres,
         verified_at=meter_photo.verified_at,

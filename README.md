@@ -267,22 +267,33 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Employee IDs are taken from the authenticated session; only Boss accounts may
   submit a vehicle ID, and the backend verifies it against the selected meter
   photo and active vehicle record.
-- A private photo of the PIUSI meter display is required. Keep the display centered
-  and close in the frame, with both the large current-fill row and smaller
-  cumulative-total row visible and in focus. Avoid glare. Employees review the
-  extracted values and confirm they match the display; they cannot type or change
-  readings. Missing, low-confidence, or unavailable OCR blocks verification and
-  transaction submission.
-- Production uses Google Cloud Vision `DOCUMENT_TEXT_DETECTION`. Before sending a
-  PIUSI photo to Vision, the backend crops and upscales the display, then sends a
-  contrast-enhanced close crop of each digit row to improve digit recognition.
-  Since the PIUSI display uses three decimal places for the current-fill row and
-  four for TOTAL, the backend restores those decimal positions even when OCR
-  misreads or misses the decimal mark. If the close crop misses the current row,
-  OCR can fall back to the full-display reading. OCR only marks a reading ready
-  at 80% confidence or higher, and a TOTAL mismatch between full-display and
-  close-up OCR requires a retake. Integer digit counts remain unrestricted. The
-  Render blueprint sets
+- A private meter photo is required. The backend applies EXIF orientation,
+  locates and rectifies the green LCD area, crops its two rows separately, and
+  uses OpenCV to classify seven-segment digits and search for each row's decimal
+  point. Google Cloud Vision remains the primary production OCR provider; the
+  backend requests both `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses
+  their text/bounds as additional evidence, and compares Vision digits with the
+  independent segment result. Tesseract remains an optional local fallback.
+- Decimal positions are never restored from fixed row formats or digit counts.
+  Raw digits and the independently detected decimal position are stored
+  separately. A missing decimal point, a Vision/segment disagreement, or an
+  uncertain display crop blocks automatic verification. Employees see the
+  original photo, provider/confidence/warnings, raw segment digits, and editable
+  Current Fill and Cumulative Total fields; they must check both values against
+  the photo before submitting. Confirmation values are parsed as `Decimal`
+  before the existing database/business-rule layer is used. Current fill is
+  flagged when it exceeds a configured tank capacity, and a lower cumulative
+  total is flagged for reset/replacement review without changing the existing
+  submission rules.
+- A labeled reference image and dataset instructions are in
+  [`tests/datasets/piusi_k600_3`](./tests/datasets/piusi_k600_3). The reference
+  fixture labels Current Fill `22.032` and Cumulative Total `26.1563`; its
+  decimal dots are not confidently visible to the segment detector, so the
+  correct automated outcome is manual review rather than a guessed ready
+  reading. This single photo does not establish general accuracy. Add further
+  independently labeled, non-transaction photos there before assessing
+  accuracy.
+- The Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to
   Tesseract; to use Google Vision locally, set:
@@ -300,7 +311,16 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Google lists the first 1,000 Vision units per month as free; review the
   [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
   alerts, and get approval before sending company photos.
-  Local development automatically uses Google Vision when
+  When an LCD is detected, Vision receives a rectified display image and
+  separate enhanced row crops. If the TOTAL crop is unreadable or low-confidence,
+  the backend uses Vision's detected word bounds to crop and enlarge that exact
+  row for a fourth pass. The Render configuration and Google key remain
+  backend-only. Keep the key out of source control and the frontend; restrict it
+  to the Vision API and your backend's use. Google lists the first 1,000 Vision
+  units per month as free; review the
+  [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
+  alerts, and get approval before sending company photos. Local development
+  automatically uses Google Vision when
   `GOOGLE_CLOUD_VISION_API_KEY` is configured, unless `FUEL_OCR_PROVIDER` is
   explicitly set to another provider.
   When `FUEL_ENV=production` and no provider is explicitly set, the backend

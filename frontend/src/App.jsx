@@ -383,11 +383,27 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
   const [uploadStatus, setUploadStatus] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState('');
+  const [currentFillDraft, setCurrentFillDraft] = useState('');
+  const [cumulativeTotalDraft, setCumulativeTotalDraft] = useState('');
 
   useEffect(() => {
     if (!previewUrl) return undefined;
     return () => URL.revokeObjectURL(previewUrl);
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (!photo || photo.verifiedAt) return;
+    setCurrentFillDraft(
+      photo.ocrCurrentFillLitres == null
+        ? ''
+        : String(photo.ocrCurrentFillLitres)
+    );
+    setCumulativeTotalDraft(
+      photo.ocrCumulativeTotalLitres == null
+        ? ''
+        : String(photo.ocrCumulativeTotalLitres)
+    );
+  }, [photo]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -513,7 +529,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     setError('');
     try {
       const verifiedPhoto = await verifyMeterPhoto(photo.id, {
-        confirmed: true
+        confirmed: true,
+        currentFillLitres: currentFillDraft.trim(),
+        cumulativeTotalLitres: cumulativeTotalDraft.trim()
       });
       setPhoto(verifiedPhoto);
       onVerified(verifiedPhoto);
@@ -529,6 +547,8 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     setPhoto(null);
     setPendingPhoto(null);
     setPreviewUrl(null);
+    setCurrentFillDraft('');
+    setCumulativeTotalDraft('');
     setError('');
     onVerified(null);
     void openCamera();
@@ -658,6 +678,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           )}
           <div className="meter-review-status" role="status">
             Photo stored privately for <strong>{photo.registrationNumber}</strong>.
+            OCR provider: <strong>{photo.ocrProvider || 'Unavailable'}</strong>.
             OCR status: <strong>{photo.ocrStatus}</strong>.
             {photo.ocrMessage && <p>{photo.ocrMessage}</p>}
           </div>
@@ -665,26 +686,49 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="fuel" size={14} />
-                <span>OCR Current Fill</span>
+                <span>Current Fill</span>
               </span>
               <strong>
                 {formatLitres(photo.ocrCurrentFillLitres)} litres
                 {photo.ocrCurrentFillConfidence != null &&
                   ` (${Math.round(photo.ocrCurrentFillConfidence)}% confidence)`}
               </strong>
+              <small>
+                Segment digits: {photo.ocrCurrentFillRawDigits || 'not detected'}.
+                Decimal: {photo.ocrCurrentFillDecimalPosition == null
+                  ? 'uncertain'
+                  : `after ${photo.ocrCurrentFillDecimalPosition} digits`}.
+                {photo.ocrCurrentFillSegmentConfidence != null &&
+                  ` Segment confidence ${Math.round(photo.ocrCurrentFillSegmentConfidence)}%.`}
+              </small>
             </div>
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
-                <span>OCR Cumulative Total</span>
+                <span>Cumulative Total</span>
               </span>
               <strong>
                 {formatLitres(photo.ocrCumulativeTotalLitres)} litres
                 {photo.ocrCumulativeTotalConfidence != null &&
                   ` (${Math.round(photo.ocrCumulativeTotalConfidence)}% confidence)`}
               </strong>
+              <small>
+                Segment digits: {photo.ocrCumulativeTotalRawDigits || 'not detected'}.
+                Decimal: {photo.ocrCumulativeTotalDecimalPosition == null
+                  ? 'uncertain'
+                  : `after ${photo.ocrCumulativeTotalDecimalPosition} digits`}.
+                {photo.ocrCumulativeTotalSegmentConfidence != null &&
+                  ` Segment confidence ${Math.round(photo.ocrCumulativeTotalSegmentConfidence)}%.`}
+              </small>
             </div>
           </div>
+          {photo.ocrWarnings?.length > 0 && (
+            <ul className="meter-ocr-warnings" aria-label="OCR warnings">
+              {photo.ocrWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          )}
           {photo.verifiedAt ? (
             <div className="meter-readings verified-readings" role="status">
               <div>
@@ -711,52 +755,54 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             </div>
           ) : (
             <form className="meter-review-form" onSubmit={handleVerify}>
-              {photo.ocrStatus === 'ready' &&
-              photo.ocrCurrentFillLitres != null &&
-              photo.ocrCumulativeTotalLitres != null ? (
-                <>
-                  <p>
-                    Check these OCR readings against the PIUSI display. If they do not match,
-                    retake the photo; readings cannot be typed or edited.
-                  </p>
-                  <label className="meter-confirmation">
-                    <input type="checkbox" required />
-                    Both readings match the PIUSI display.
-                  </label>
-                  <button
-                    className="primary-button"
-                    type="submit"
-                    disabled={verifying}
-                  >
-                    <AppIcon name="check" size={16} />
-                    {verifying ? 'Verifying...' : 'Confirm meter readings'}
-                  </button>
-                  <button
-                    className="outline-button"
-                    type="button"
-                    onClick={startAnotherPhoto}
-                    disabled={verifying}
-                  >
-                    Retake photo
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="auth-error" role="alert">
-                    Readings are unavailable or uncertain.{' '}
-                    {photo.ocrMessage || 'Check focus and glare, then try another photo.'}
-                    {' '}Manual meter entries are not accepted.
-                  </p>
-                  <button
-                    className="outline-button"
-                    type="button"
-                    onClick={startAnotherPhoto}
-                  >
-                    <AppIcon name="camera" size={15} />
-                    Retake photo
-                  </button>
-                </>
-              )}
+              <p>
+                Check both values against the original photo. Edit either reading
+                if OCR or decimal recognition is uncertain. Use a decimal point.
+              </p>
+              <label>
+                Current Fill (L)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  required
+                  value={currentFillDraft}
+                  onChange={(event) => setCurrentFillDraft(event.target.value)}
+                  placeholder="e.g. 22.032"
+                />
+              </label>
+              <label>
+                Cumulative Total (L)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  required
+                  value={cumulativeTotalDraft}
+                  onChange={(event) => setCumulativeTotalDraft(event.target.value)}
+                  placeholder="e.g. 26.1563"
+                />
+              </label>
+              <label className="meter-confirmation">
+                <input type="checkbox" required />
+                I checked both readings against the meter photo.
+              </label>
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={verifying}
+              >
+                <AppIcon name="check" size={16} />
+                {verifying ? 'Verifying...' : 'Confirm meter readings'}
+              </button>
+              <button
+                className="outline-button"
+                type="button"
+                onClick={startAnotherPhoto}
+                disabled={verifying}
+              >
+                Retake photo
+              </button>
             </form>
           )}
         </div>

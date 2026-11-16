@@ -4,6 +4,7 @@ import os
 import asyncio
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from hashlib import sha256
 from http.cookies import SimpleCookie
 from io import BytesIO
@@ -127,6 +128,7 @@ from backend.app.services.meter_photos import (
 from backend.app.services.meter_ocr import (
     MeterOcrResult,
     extract_meter_readings,
+    _extract_google_vision_readings,
     parse_meter_ocr_data,
 )
 from backend.app.services.vehicle_meter_events import authorize_odometer_correction
@@ -1194,9 +1196,9 @@ class DatabaseTests(unittest.TestCase):
                 "/opt/local/bin/tesseract",
             )
 
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 5.0)
-        self.assertEqual(result.cumulative_total_litres, 9667.5)
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.current_fill_litres)
+        self.assertIsNone(result.cumulative_total_litres)
 
     def test_tesseract_detects_standard_windows_install_path(self) -> None:
         import pytesseract
@@ -1228,9 +1230,9 @@ class DatabaseTests(unittest.TestCase):
             result = extract_meter_readings(image_buffer.getvalue())
             self.assertEqual(pytesseract.pytesseract.tesseract_cmd, windows_path)
 
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 5.0)
-        self.assertEqual(result.cumulative_total_litres, 9667.5)
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.current_fill_litres)
+        self.assertIsNone(result.cumulative_total_litres)
 
     def test_tesseract_retries_center_crop_with_digit_whitelist(self) -> None:
         import pytesseract
@@ -1260,9 +1262,9 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(calls[0].args[0].size, (1600, 1600))
         self.assertEqual(calls[4].args[0].size, (1600, 819))
         self.assertIn("tessedit_char_whitelist", calls[1].kwargs["config"])
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 12.5)
-        self.assertEqual(result.cumulative_total_litres, 261563.0)
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.current_fill_litres)
+        self.assertIsNone(result.cumulative_total_litres)
 
     def test_tesseract_failure_is_reported_without_auto_acceptance(self) -> None:
         import pytesseract
@@ -1353,7 +1355,9 @@ class DatabaseTests(unittest.TestCase):
                 return_value=response,
             ) as urlopen_mock,
         ):
-            result = extract_meter_readings(image.getvalue())
+            result = _extract_google_vision_readings(
+                image.getvalue(), "test-key"
+            )
 
         request = urlopen_mock.call_args.args[0]
         request_payload = json.loads(request.data)
@@ -1362,7 +1366,10 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(len(request_payload["requests"]), 3)
         self.assertEqual(
             request_payload["requests"][0]["features"],
-            [{"type": "DOCUMENT_TEXT_DETECTION"}],
+            [
+                {"type": "TEXT_DETECTION"},
+                {"type": "DOCUMENT_TEXT_DETECTION"},
+            ],
         )
         prepared_image = Image.open(
             BytesIO(
@@ -1391,9 +1398,11 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertEqual(total_row_image.width, 1600)
         self.assertLess(total_row_image.height, prepared_image.height)
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 22.032)
-        self.assertEqual(result.cumulative_total_litres, 26.1563)
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.current_fill_raw_digits, "22032")
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertIsNone(result.current_fill_decimal_position)
+        self.assertIsNone(result.cumulative_total_decimal_position)
         self.assertEqual(result.current_fill_confidence, 94.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
@@ -1452,7 +1461,9 @@ class DatabaseTests(unittest.TestCase):
                     side_effect=[variant_response, detected_response],
                 ),
             ):
-                return extract_meter_readings(image.getvalue())
+                return _extract_google_vision_readings(
+                    image.getvalue(), "test-key"
+                )
 
         disagreeing_total = read_with_total_candidates(
             "261563",
@@ -1467,8 +1478,8 @@ class DatabaseTests(unittest.TestCase):
             "2615631",
             0.65,
         )
-        self.assertEqual(low_confidence_total.status, "ready")
-        self.assertEqual(low_confidence_total.cumulative_total_litres, 26.1563)
+        self.assertEqual(low_confidence_total.status, "uncertain")
+        self.assertEqual(low_confidence_total.cumulative_total_raw_digits, "261563")
         self.assertEqual(low_confidence_total.cumulative_total_confidence, 96.0)
 
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
@@ -1546,13 +1557,23 @@ class DatabaseTests(unittest.TestCase):
                 return_value=expected,
             ) as vision_mock,
             patch(
+                "backend.app.services.meter_ocr.recognize_piusi_lcd",
+                return_value=object(),
+            ) as lcd_mock,
+            patch(
+                "backend.app.services.meter_ocr._apply_piusi_evidence",
+                side_effect=lambda result, _lcd, _provider: result,
+            ),
+            patch(
                 "backend.app.services.meter_ocr._extract_tesseract_readings"
             ) as tesseract_mock,
         ):
             result = extract_meter_readings(b"meter image")
 
         self.assertEqual(result, expected)
-        vision_mock.assert_called_once_with(b"meter image", "test-key")
+        vision_mock.assert_called_once_with(
+            b"meter image", "test-key", lcd_mock.return_value
+        )
         tesseract_mock.assert_not_called()
 
     def test_local_defaults_to_tesseract_without_google_vision_key(self) -> None:
@@ -1570,11 +1591,20 @@ class DatabaseTests(unittest.TestCase):
                 "backend.app.services.meter_ocr._extract_tesseract_readings",
                 return_value=expected,
             ) as tesseract_mock,
+            patch(
+                "backend.app.services.meter_ocr.recognize_piusi_lcd",
+                return_value=object(),
+            ) as lcd_mock,
+            patch(
+                "backend.app.services.meter_ocr._apply_piusi_evidence",
+                side_effect=lambda result, _lcd, _provider: result,
+            ),
         ):
             result = extract_meter_readings(b"meter image")
 
         self.assertEqual(result, expected)
         tesseract_mock.assert_called_once_with(b"meter image")
+        self.assertEqual(lcd_mock.call_count, 1)
         vision_mock.assert_not_called()
 
     def test_fuel_submission_uses_fill_and_compares_cumulative_reading(self) -> None:
@@ -1988,7 +2018,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("isActive", employee_payload)
         self.assertIn("totalFillLitres", summary_payload)
 
-    def test_uncertain_ocr_cannot_be_verified_or_entered_manually(self) -> None:
+    def test_uncertain_ocr_requires_manual_confirmation_of_both_values(self) -> None:
         with Session(self.engine) as session, session.begin():
             employee = create_employee(
                 session, "uncertain@example.test", "Uncertain Worker", "temporary-password"
@@ -2012,16 +2042,30 @@ class DatabaseTests(unittest.TestCase):
                 verify=False,
             )
 
-            with self.assertRaisesRegex(InvalidMeterVerification, "cannot be entered"):
-                verify_meter_photo(session, employee, photo.id)
             with self.assertRaises(ValueError):
                 MeterPhotoVerify.model_validate(
                     {
                         "confirmed": True,
                         "currentFillLitres": 7.5,
-                        "cumulativeTotalLitres": 107.5,
                     }
                 )
+            request = MeterPhotoVerify.model_validate(
+                {
+                    "confirmed": True,
+                    "currentFillLitres": "7.5",
+                    "cumulativeTotalLitres": "107.5",
+                }
+            )
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                request.current_fill_litres,
+                request.cumulative_total_litres,
+            )
+            self.assertEqual(verified.current_fill_litres, 7.5)
+            self.assertEqual(verified.cumulative_total_litres, 107.5)
+            self.assertEqual(verified.verification_method, "manual_correction")
             with self.assertRaises(ValueError):
                 FuelRecordCreate.model_validate(
                     {
@@ -2035,6 +2079,56 @@ class DatabaseTests(unittest.TestCase):
                 FuelRecordCreate.model_validate(
                     {"meterPhotoId": photo.id, "odometerKm": 1000}
                 )
+
+    def test_manual_readings_warn_for_capacity_and_lower_total_without_rejecting(
+        self,
+    ) -> None:
+        with Session(self.engine) as session, session.begin():
+            employee = create_employee(
+                session,
+                "manual-warning@example.test",
+                "Manual Worker",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "mw12 arn")
+            vehicle.tank_capacity = 50
+            employee.vehicles.append(vehicle)
+            session.add(
+                GlobalMeterState(
+                    id=1,
+                    current_cumulative_total_litres=100,
+                )
+            )
+            photo = self._create_verified_meter_photo(
+                session,
+                employee,
+                vehicle,
+                7.5,
+                107.5,
+                ocr_result=MeterOcrResult(status="uncertain"),
+                verify=False,
+            )
+
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                Decimal("60"),
+                Decimal("90"),
+            )
+
+            self.assertIsNotNone(verified.verified_at)
+            self.assertEqual(verified.current_fill_litres, 60)
+            self.assertEqual(verified.cumulative_total_litres, 90)
+            self.assertTrue(
+                any("tank capacity" in warning for warning in verified.ocr_warnings)
+            )
+            self.assertTrue(
+                any(
+                    "previous accepted reading" in warning
+                    for warning in verified.ocr_warnings
+                )
+            )
 
     def test_odometer_decrease_requires_single_use_admin_correction(self) -> None:
         with Session(self.engine) as session, session.begin():

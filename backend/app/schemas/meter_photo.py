@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -46,6 +47,14 @@ class MeterPhotoRead(BaseModel):
     ocr_cumulative_total_litres: float | None
     ocr_current_fill_confidence: float | None
     ocr_cumulative_total_confidence: float | None
+    ocr_provider: str | None
+    ocr_current_fill_raw_digits: str | None
+    ocr_current_fill_decimal_position: int | None
+    ocr_cumulative_total_raw_digits: str | None
+    ocr_cumulative_total_decimal_position: int | None
+    ocr_current_fill_segment_confidence: float | None
+    ocr_cumulative_total_segment_confidence: float | None
+    ocr_warnings: list[str] | None
     current_fill_litres: float | None
     cumulative_total_litres: float | None
     verified_at: datetime | None
@@ -61,9 +70,23 @@ class MeterPhotoVerify(BaseModel):
     )
 
     confirmed: bool
+    current_fill_litres: Decimal | None = Field(default=None, gt=0)
+    cumulative_total_litres: Decimal | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def require_confirmation(self) -> "MeterPhotoVerify":
         if not self.confirmed:
             raise ValueError("Confirm both readings against the meter before saving.")
+        if (self.current_fill_litres is None) != (
+            self.cumulative_total_litres is None
+        ):
+            raise ValueError("Enter both meter readings or neither.")
+        if (
+            self.current_fill_litres is not None
+            and not self.current_fill_litres.is_finite()
+        ) or (
+            self.cumulative_total_litres is not None
+            and not self.cumulative_total_litres.is_finite()
+        ):
+            raise ValueError("Meter readings must be finite numbers.")
         return self

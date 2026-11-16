@@ -1,5 +1,6 @@
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal
 from io import BytesIO
 import json
 import os
@@ -9,9 +10,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+import cv2
 from PIL import Image, ImageFilter, ImageOps
 
 from backend.app.core.config import METER_OCR_MIN_CONFIDENCE
+from backend.app.services.piusi_lcd import (
+    PiusiLcdRecognition,
+    recognize_piusi_lcd,
+)
 
 
 _TESSERACT_PATHS = (
@@ -40,9 +46,17 @@ class MeterOcrResult:
     current_fill_confidence: float | None = None
     cumulative_total_confidence: float | None = None
     message: str | None = None
+    provider: str | None = None
+    current_fill_raw_digits: str | None = None
+    current_fill_decimal_position: int | None = None
+    cumulative_total_raw_digits: str | None = None
+    cumulative_total_decimal_position: int | None = None
+    current_fill_segment_confidence: float | None = None
+    cumulative_total_segment_confidence: float | None = None
+    warnings: tuple[str, ...] = ()
 
 
-def _number_from_token(value: str) -> float | None:
+def _number_from_token(value: str) -> Decimal | None:
     if not any(character.isdigit() for character in value):
         return None
     normalized = value.upper().replace("O", "0").replace("Q", "0")
@@ -60,45 +74,33 @@ def _number_from_token(value: str) -> float | None:
         whole, _, fraction = number.rpartition(".")
         number = whole.replace(".", "") + "." + fraction
     try:
-        return float(number)
-    except ValueError:
+        parsed = Decimal(number)
+        return parsed if parsed.is_finite() else None
+    except (ValueError, ArithmeticError):
         return None
+
+
+def _raw_digits_and_decimal_position(value: str) -> tuple[str | None, int | None]:
+    normalized = value.upper().replace("O", "0").replace("Q", "0")
+    normalized = normalized.replace("I", "1").replace("L", "1")
+    digits = "".join(re.findall(r"[0-9]", normalized))
+    if not digits:
+        return None, None
+    separators = [index for index, character in enumerate(normalized) if character in ".,:"]
+    if len(separators) != 1:
+        return digits, None
+    separator = separators[0]
+    before = len(re.findall(r"[0-9]", normalized[:separator]))
+    after = len(re.findall(r"[0-9]", normalized[separator + 1 :]))
+    if before == 0 or after == 0:
+        return digits, None
+    return digits, before
 
 
 def _number_from_google_vision_words(
     numeric_words: list[tuple[str, float]],
-    *,
-    infer_decimal_from_word_groups: bool,
-    decimal_places: int | None = None,
-) -> float | None:
-    text = "".join(word for word, _ in numeric_words)
-    number = _number_from_token(text)
-    if number is None or not infer_decimal_from_word_groups:
-        return number
-
-    digit_groups = [
-        group
-        for word, _ in numeric_words
-        for group in re.findall(r"[0-9OQIL]+", word.upper())
-    ]
-    if decimal_places is not None:
-        digits = "".join(digit_groups)
-        if len(digits) <= decimal_places:
-            return None
-        return _number_from_token(
-            f"{digits[:-decimal_places]}.{digits[-decimal_places:]}"
-        )
-
-    if any("." in word or "," in word for word, _ in numeric_words):
-        return number
-    if len(digit_groups) >= 2:
-        # Vision can replace a PIUSI row's decimal mark with a space.
-        inferred_number = _number_from_token(
-            f"{digit_groups[0]}.{''.join(digit_groups[1:])}"
-        )
-        return inferred_number if inferred_number is not None else number
-
-    return number
+) -> Decimal | None:
+    return _number_from_token("".join(word for word, _ in numeric_words))
 
 
 def parse_meter_ocr_data(
@@ -128,16 +130,19 @@ def parse_meter_ocr_data(
     readings = []
     for line in lines.values():
         candidates = [
-            (number, confidence)
+            (number, confidence, word)
             for word, confidence in line["words"]
             if (number := _number_from_token(word)) is not None
         ]
         if not candidates:
             continue
-        number, confidence = max(
+        number, confidence, raw_text = max(
             candidates, key=lambda candidate: len(str(candidate[0]))
         )
-        readings.append((int(line["top"]), number, confidence))
+        raw_digits, decimal_position = _raw_digits_and_decimal_position(raw_text)
+        readings.append(
+            (int(line["top"]), number, confidence, raw_digits, decimal_position)
+        )
 
     readings.sort(key=lambda reading: reading[0])
     if len(readings) < 2:
@@ -149,16 +154,32 @@ def parse_meter_ocr_data(
             ),
         )
 
-    _, current_fill, current_confidence = readings[0]
-    _, cumulative_total, cumulative_confidence = readings[1]
+    (
+        _,
+        current_fill,
+        current_confidence,
+        current_raw_digits,
+        current_decimal_position,
+    ) = readings[0]
+    (
+        _,
+        cumulative_total,
+        cumulative_confidence,
+        total_raw_digits,
+        total_decimal_position,
+    ) = readings[1]
     if current_fill <= 0:
         return MeterOcrResult(
             status="uncertain",
-            current_fill_litres=current_fill,
-            cumulative_total_litres=cumulative_total,
+            current_fill_litres=float(current_fill),
+            cumulative_total_litres=float(cumulative_total),
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=cumulative_confidence,
             message="The first-line fill was read as zero; check the PIUSI display.",
+            current_fill_raw_digits=current_raw_digits,
+            current_fill_decimal_position=current_decimal_position,
+            cumulative_total_raw_digits=total_raw_digits,
+            cumulative_total_decimal_position=total_decimal_position,
         )
     confidences = (current_confidence, cumulative_confidence)
     if min(confidences) < min_confidence:
@@ -172,11 +193,15 @@ def parse_meter_ocr_data(
         status = "ready"
     return MeterOcrResult(
         status=status,
-        current_fill_litres=current_fill,
-        cumulative_total_litres=cumulative_total,
+        current_fill_litres=float(current_fill),
+        cumulative_total_litres=float(cumulative_total),
         current_fill_confidence=current_confidence,
         cumulative_total_confidence=cumulative_confidence,
         message=message,
+        current_fill_raw_digits=current_raw_digits,
+        current_fill_decimal_position=current_decimal_position,
+        cumulative_total_raw_digits=total_raw_digits,
+        cumulative_total_decimal_position=total_decimal_position,
     )
 
 
@@ -249,6 +274,31 @@ def _prepare_google_vision_row_image(
 
     prepared = BytesIO()
     image.save(prepared, format="JPEG", quality=95)
+    return prepared.getvalue()
+
+
+def _prepare_google_vision_detected_image(
+    content: bytes,
+    *,
+    grayscale: bool,
+    min_width: int,
+) -> bytes:
+    with Image.open(BytesIO(content)) as source:
+        image = ImageOps.exif_transpose(source)
+        image = image.convert("L" if grayscale else "RGB")
+    if grayscale:
+        image = ImageOps.autocontrast(image, cutoff=1)
+        image = image.filter(
+            ImageFilter.UnsharpMask(radius=2, percent=160, threshold=3)
+        )
+    if image.width < min_width:
+        scale = min_width / image.width
+        image = image.resize(
+            (min_width, round(image.height * scale)),
+            Image.Resampling.LANCZOS,
+        )
+    prepared = BytesIO()
+    image.save(prepared, format="JPEG", quality=96)
     return prepared.getvalue()
 
 
@@ -383,9 +433,6 @@ def _prepare_google_vision_detected_row_image(
 
 def _google_vision_word_lines(
     document: dict[str, object],
-    *,
-    infer_decimal_from_word_groups: bool = False,
-    decimal_places_by_row: tuple[int, ...] | None = None,
 ) -> list[tuple[int, str, float]]:
     words = []
     pages = document.get("pages", [])
@@ -487,19 +534,8 @@ def _google_vision_word_lines(
         ]
         if not numeric_words:
             continue
-        number = _number_from_google_vision_words(
-            numeric_words,
-            infer_decimal_from_word_groups=(
-                infer_decimal_from_word_groups or len(readings) == 1
-            ),
-            decimal_places=(
-                decimal_places_by_row[len(readings)]
-                if decimal_places_by_row is not None
-                and len(readings) < len(decimal_places_by_row)
-                else None
-            ),
-        )
-        if number is None:
+        raw_text = "".join(word for word, _ in numeric_words)
+        if _number_from_google_vision_words(numeric_words) is None:
             continue
         confidence = sum(
             confidence
@@ -510,8 +546,79 @@ def _google_vision_word_lines(
             for text, _ in numeric_words
             if any(character.isdigit() for character in text)
         )
-        readings.append((int(float(line["center"])), str(number), confidence))
+        readings.append((int(float(line["center"])), raw_text, confidence))
     return readings
+
+
+def _google_vision_text_annotation_lines(
+    response: dict[str, object],
+) -> list[tuple[int, str, float]]:
+    annotations = response.get("textAnnotations")
+    if not isinstance(annotations, list):
+        return []
+    words = []
+    for annotation in annotations[1:]:
+        if not isinstance(annotation, dict):
+            continue
+        text = str(annotation.get("description", ""))
+        if not any(character.isdigit() for character in text):
+            continue
+        polygon = annotation.get("boundingPoly", {})
+        vertices = polygon.get("vertices", []) if isinstance(polygon, dict) else []
+        if not isinstance(vertices, list):
+            continue
+        points = [
+            (float(vertex.get("x", 0)), float(vertex.get("y", 0)))
+            for vertex in vertices
+            if isinstance(vertex, dict)
+        ]
+        if not points:
+            continue
+        left = min(point[0] for point in points)
+        top = min(point[1] for point in points)
+        bottom = max(point[1] for point in points)
+        words.append(((top + bottom) / 2, left, max(bottom - top, 1), text))
+
+    lines: list[dict[str, object]] = []
+    for center, left, height, text in sorted(
+        words, key=lambda word: (word[0], word[1])
+    ):
+        line = next(
+            (
+                item
+                for item in lines
+                if abs(center - float(item["center"]))
+                <= max(8.0, min(height, float(item["height"])) * 0.55)
+            ),
+            None,
+        )
+        if line is None:
+            line = {"center": center, "height": height, "words": []}
+            lines.append(line)
+        line_words = line["words"]
+        line_words.append((center, left, text))
+        line["center"] = sum(word[0] for word in line_words) / len(line_words)
+
+    readings = []
+    for line in sorted(lines, key=lambda item: float(item["center"])):
+        text = "".join(
+            word[2]
+            for word in sorted(line["words"], key=lambda word: word[1])
+            if any(character.isdigit() for character in word[2])
+            or word[2].strip() in {".", ","}
+        )
+        if _number_from_token(text) is not None:
+            readings.append((int(float(line["center"])), text, 0.0))
+    return readings
+
+
+def _google_vision_response_lines(
+    response: dict[str, object],
+) -> list[tuple[int, str, float]]:
+    document = response.get("fullTextAnnotation")
+    if isinstance(document, dict):
+        return _google_vision_word_lines(document)
+    return _google_vision_text_annotation_lines(response)
 
 
 def _parse_google_vision_response(response_data: object) -> MeterOcrResult:
@@ -536,9 +643,27 @@ def _parse_google_vision_response(response_data: object) -> MeterOcrResult:
         )
     document = vision_response.get("fullTextAnnotation")
     if not isinstance(document, dict):
-        return MeterOcrResult(
+        readings = _google_vision_text_annotation_lines(vision_response)
+        if len(readings) < 2:
+            return MeterOcrResult(
+                status="uncertain",
+                message="Google Vision could not find two readable numeric rows.",
+            )
+        data: dict[str, list[object]] = {
+            "text": [reading[1] for reading in readings],
+            "conf": [reading[2] for reading in readings],
+            "top": [reading[0] for reading in readings],
+            "block_num": [1 for _ in readings],
+            "par_num": [1 for _ in readings],
+            "line_num": list(range(1, len(readings) + 1)),
+        }
+        return replace(
+            parse_meter_ocr_data(data),
             status="uncertain",
-            message="Google Vision could not find readable text in this photo.",
+            message=(
+                "Only TEXT_DETECTION evidence was available; confidence is "
+                "insufficient for automatic verification."
+            ),
         )
     readings = _google_vision_word_lines(document)
     if len(readings) < 2:
@@ -561,9 +686,34 @@ def _parse_google_vision_response(response_data: object) -> MeterOcrResult:
     return parse_meter_ocr_data(data)
 
 
+def _google_vision_text_detection_disagrees(
+    response: dict[str, object],
+    document: dict[str, object],
+) -> bool:
+    annotations = response.get("textAnnotations")
+    document_text = document.get("text")
+    if (
+        not isinstance(annotations, list)
+        or not annotations
+        or not isinstance(annotations[0], dict)
+        or not isinstance(annotations[0].get("description"), str)
+        or not isinstance(document_text, str)
+    ):
+        return False
+    text_detection_digits = "".join(
+        re.findall(r"\d", annotations[0]["description"])
+    )
+    document_digits = "".join(re.findall(r"\d", document_text))
+    return bool(text_detection_digits and document_digits) and (
+        text_detection_digits != document_digits
+    )
+
+
 def _call_google_vision(
     images: list[bytes],
     api_key: str,
+    *,
+    text_detection_first: bool = False,
 ) -> object | MeterOcrResult:
     url = f"{_GOOGLE_VISION_ENDPOINT}?{urlencode({'key': api_key})}"
     request_body = json.dumps(
@@ -571,9 +721,16 @@ def _call_google_vision(
             "requests": [
                 {
                     "image": {"content": base64.b64encode(image).decode("ascii")},
-                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
+                    "features": (
+                        [
+                            {"type": "TEXT_DETECTION"},
+                            {"type": "DOCUMENT_TEXT_DETECTION"},
+                        ]
+                        if text_detection_first and index == 0
+                        else [{"type": "DOCUMENT_TEXT_DETECTION"}]
+                    ),
                 }
-                for image in images
+                for index, image in enumerate(images)
             ]
         }
     ).encode("utf-8")
@@ -614,19 +771,43 @@ def _call_google_vision(
 def _extract_google_vision_readings(
     content: bytes,
     api_key: str,
+    lcd: PiusiLcdRecognition | None = None,
 ) -> MeterOcrResult:
     try:
-        display_content = _prepare_google_vision_image(content)
-        current_row_content = _prepare_google_vision_row_image(
-            content,
-            _GOOGLE_VISION_CURRENT_ROW_CROP,
-            _GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH,
-        )
-        total_row_content = _prepare_google_vision_row_image(
-            content,
-            _GOOGLE_VISION_TOTAL_ROW_CROP,
-            _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
-        )
+        if (
+            lcd is not None
+            and lcd.display_found
+            and lcd.display_crop is not None
+            and lcd.current_row_crop is not None
+            and lcd.total_row_crop is not None
+        ):
+            display_content = _prepare_google_vision_detected_image(
+                lcd.display_crop,
+                grayscale=False,
+                min_width=_GOOGLE_VISION_MIN_WIDTH,
+            )
+            current_row_content = _prepare_google_vision_detected_image(
+                lcd.current_row_crop,
+                grayscale=True,
+                min_width=_GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH,
+            )
+            total_row_content = _prepare_google_vision_detected_image(
+                lcd.total_row_crop,
+                grayscale=True,
+                min_width=_GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
+            )
+        else:
+            display_content = _prepare_google_vision_image(content)
+            current_row_content = _prepare_google_vision_row_image(
+                content,
+                _GOOGLE_VISION_CURRENT_ROW_CROP,
+                _GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH,
+            )
+            total_row_content = _prepare_google_vision_row_image(
+                content,
+                _GOOGLE_VISION_TOTAL_ROW_CROP,
+                _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
+            )
     except (OSError, ValueError, Image.DecompressionBombError):
         return MeterOcrResult(
             status="failed",
@@ -636,6 +817,7 @@ def _extract_google_vision_readings(
     response_data = _call_google_vision(
         [display_content, current_row_content, total_row_content],
         api_key,
+        text_detection_first=True,
     )
     if isinstance(response_data, MeterOcrResult):
         return response_data
@@ -670,15 +852,7 @@ def _extract_google_vision_readings(
         return display_result
 
     display_document = responses[0].get("fullTextAnnotation")
-    display_readings = (
-        _google_vision_word_lines(
-            display_document,
-            infer_decimal_from_word_groups=True,
-            decimal_places_by_row=(3, 4),
-        )
-        if isinstance(display_document, dict)
-        else []
-    )
+    display_readings = _google_vision_response_lines(responses[0])
     display_current = display_readings[0] if display_readings else None
 
     current_response = responses[1]
@@ -690,15 +864,7 @@ def _extract_google_vision_readings(
             message=f"Google Vision error reading the current-fill row: {message}",
         )
     current_document = current_response.get("fullTextAnnotation")
-    current_readings = (
-        _google_vision_word_lines(
-            current_document,
-            infer_decimal_from_word_groups=True,
-            decimal_places_by_row=(3,),
-        )
-        if isinstance(current_document, dict)
-        else []
-    )
+    current_readings = _google_vision_response_lines(current_response)
     current_reading = (
         current_readings[0]
         if current_readings
@@ -715,15 +881,7 @@ def _extract_google_vision_readings(
     total_response = responses[2]
     total_error = total_response.get("error")
     total_document = total_response.get("fullTextAnnotation")
-    total_readings = (
-        _google_vision_word_lines(
-            total_document,
-            infer_decimal_from_word_groups=True,
-            decimal_places_by_row=(4,),
-        )
-        if isinstance(total_document, dict)
-        else []
-    )
+    total_readings = _google_vision_response_lines(total_response)
     if (
         (not total_readings or total_readings[0][2] < _GOOGLE_VISION_MIN_CONFIDENCE)
         and isinstance(display_document, dict)
@@ -767,15 +925,7 @@ def _extract_google_vision_readings(
                     message=f"Google Vision error reading the detected TOTAL row: {message}",
                 )
             detected_document = detected_result.get("fullTextAnnotation")
-            detected_readings = (
-                _google_vision_word_lines(
-                    detected_document,
-                    infer_decimal_from_word_groups=True,
-                    decimal_places_by_row=(4,),
-                )
-                if isinstance(detected_document, dict)
-                else []
-            )
+            detected_readings = _google_vision_response_lines(detected_result)
             if detected_readings and (
                 not total_readings
                 or detected_readings[0][2] > total_readings[0][2]
@@ -799,10 +949,23 @@ def _extract_google_vision_readings(
     _, current_text, current_confidence = current_reading
     _, total_text, total_confidence = total_readings[0]
     display_total = display_readings[1] if len(display_readings) > 1 else None
+    display_total_value = (
+        _number_from_token(display_total[1])
+        if display_total is not None
+        else None
+    )
+    total_value = _number_from_token(total_text)
     if (
-        display_total is not None
-        and abs(float(display_total[1]) - float(total_text)) > 0.00005
+        display_total_value is not None
+        and total_value is not None
+        and abs(display_total_value - total_value) > Decimal("0.00005")
     ):
+        current_raw_digits, current_decimal_position = (
+            _raw_digits_and_decimal_position(current_text)
+        )
+        total_raw_digits, total_decimal_position = (
+            _raw_digits_and_decimal_position(total_text)
+        )
         return MeterOcrResult(
             status="uncertain",
             current_fill_litres=float(current_text),
@@ -813,9 +976,13 @@ def _extract_google_vision_readings(
                 "Google Vision read different PIUSI TOTAL values from the display "
                 "and close-up. Retake the photo."
             ),
+            current_fill_raw_digits=current_raw_digits,
+            current_fill_decimal_position=current_decimal_position,
+            cumulative_total_raw_digits=total_raw_digits,
+            cumulative_total_decimal_position=total_decimal_position,
         )
 
-    return parse_meter_ocr_data(
+    result = parse_meter_ocr_data(
         {
             "text": [
                 current_text,
@@ -832,6 +999,22 @@ def _extract_google_vision_readings(
         },
         min_confidence=_GOOGLE_VISION_MIN_CONFIDENCE,
     )
+    if (
+        isinstance(display_document, dict)
+        and _google_vision_text_detection_disagrees(
+            responses[0], display_document
+        )
+    ):
+        warning = (
+            "Google Vision TEXT_DETECTION and DOCUMENT_TEXT_DETECTION disagree."
+        )
+        return replace(
+            result,
+            status="uncertain",
+            message=warning,
+            warnings=(warning,),
+        )
+    return result
 
 
 def _resize_for_tesseract(image: Image.Image) -> Image.Image:
@@ -933,6 +1116,146 @@ def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
     )
 
 
+def _apply_piusi_evidence(
+    result: MeterOcrResult,
+    lcd: PiusiLcdRecognition,
+    provider: str,
+) -> MeterOcrResult:
+    current = lcd.current_fill
+    total = lcd.cumulative_total
+    warnings = list(result.warnings) + list(lcd.warnings)
+
+    if result.status in {"failed", "unavailable"}:
+        return replace(
+            result,
+            provider=provider,
+            current_fill_raw_digits=current.raw_digits,
+            current_fill_decimal_position=current.decimal_position,
+            cumulative_total_raw_digits=total.raw_digits,
+            cumulative_total_decimal_position=total.decimal_position,
+            current_fill_segment_confidence=(
+                current.confidence * 100 if current.confidence is not None else None
+            ),
+            cumulative_total_segment_confidence=(
+                total.confidence * 100 if total.confidence is not None else None
+            ),
+            warnings=tuple(warnings),
+        )
+
+    if not lcd.display_found:
+        return MeterOcrResult(
+            status="uncertain",
+            message="Could not locate the PIUSI display; retake a closer photo.",
+            provider=provider,
+            warnings=tuple(warnings),
+        )
+
+    for row_name, vision_digits, segment_row in (
+        ("current-fill", result.current_fill_raw_digits, current),
+        ("cumulative-total", result.cumulative_total_raw_digits, total),
+    ):
+        if segment_row.raw_digits is None:
+            continue
+        if vision_digits is None:
+            warnings.append(
+                f"Google Vision did not provide raw {row_name} digits for comparison."
+            )
+        elif vision_digits != segment_row.raw_digits:
+            warnings.append(
+                f"Google Vision and seven-segment recognition disagree on the {row_name} digits."
+            )
+        if (
+            segment_row.decimal_position is not None
+            and (
+                vision_digits == segment_row.raw_digits
+                and (
+                    (row_name == "current-fill"
+                     and result.current_fill_decimal_position is not None
+                     and result.current_fill_decimal_position
+                     != segment_row.decimal_position)
+                    or (row_name == "cumulative-total"
+                        and result.cumulative_total_decimal_position is not None
+                        and result.cumulative_total_decimal_position
+                        != segment_row.decimal_position)
+                )
+            )
+        ):
+            warnings.append(
+                f"Google Vision and seven-segment recognition disagree on the {row_name} decimal point."
+            )
+
+    if current.decimal_position is None:
+        warnings.append("The current-fill decimal point needs manual confirmation.")
+    if total.decimal_position is None:
+        warnings.append("The cumulative-total decimal point needs manual confirmation.")
+
+    current_digits_match = (
+        current.raw_digits is not None
+        and current.raw_digits == result.current_fill_raw_digits
+    )
+    total_digits_match = (
+        total.raw_digits is not None
+        and total.raw_digits == result.cumulative_total_raw_digits
+    )
+    current_value = (
+        float(current.value)
+        if current_digits_match and current.value is not None
+        else (
+            result.current_fill_litres
+            if result.current_fill_decimal_position is not None
+            else None
+        )
+    )
+    total_value = (
+        float(total.value)
+        if total_digits_match and total.value is not None
+        else (
+            result.cumulative_total_litres
+            if result.cumulative_total_decimal_position is not None
+            else None
+        )
+    )
+    if not current_digits_match or not total_digits_match:
+        if not current_digits_match:
+            warnings.append("The current-fill digits need manual review.")
+        if not total_digits_match:
+            warnings.append("The cumulative-total digits need manual review.")
+
+    warnings = list(dict.fromkeys(warnings))
+    message = "; ".join(warnings) if warnings else result.message
+    status = result.status
+    if warnings or current_value is None or total_value is None:
+        status = "uncertain"
+    elif (
+        (current.confidence or 0) < 0.65
+        or (total.confidence or 0) < 0.65
+    ):
+        status = "uncertain"
+        message = "Seven-segment confidence is low. Review both readings manually."
+        warnings.append(message)
+
+    return MeterOcrResult(
+        status=status,
+        current_fill_litres=current_value,
+        cumulative_total_litres=total_value,
+        current_fill_confidence=result.current_fill_confidence,
+        cumulative_total_confidence=result.cumulative_total_confidence,
+        message=message,
+        provider=provider,
+        current_fill_raw_digits=current.raw_digits,
+        current_fill_decimal_position=current.decimal_position,
+        cumulative_total_raw_digits=total.raw_digits,
+        cumulative_total_decimal_position=total.decimal_position,
+        current_fill_segment_confidence=(
+            current.confidence * 100 if current.confidence is not None else None
+        ),
+        cumulative_total_segment_confidence=(
+            total.confidence * 100 if total.confidence is not None else None
+        ),
+        warnings=tuple(warnings),
+    )
+
+
 def extract_meter_readings(content: bytes) -> MeterOcrResult:
     vision_api_key = os.environ.get("GOOGLE_CLOUD_VISION_API_KEY", "").strip()
     default_provider = (
@@ -948,15 +1271,45 @@ def extract_meter_readings(content: bytes) -> MeterOcrResult:
         if not vision_api_key:
             return MeterOcrResult(
                 status="unavailable",
+                provider=provider,
                 message=(
                     "Google Vision is selected, but "
                     "GOOGLE_CLOUD_VISION_API_KEY is not configured."
                 ),
             )
-        return _extract_google_vision_readings(content, vision_api_key)
+        try:
+            lcd = recognize_piusi_lcd(content)
+        except (
+            OSError,
+            ValueError,
+            Image.DecompressionBombError,
+            cv2.error,
+        ) as error:
+            return MeterOcrResult(
+                status="failed",
+                provider=provider,
+                message=f"Could not process the uploaded meter photo: {error}",
+            )
+        result = _extract_google_vision_readings(content, vision_api_key, lcd)
+        return _apply_piusi_evidence(result, lcd, provider)
     if provider != "tesseract":
         return MeterOcrResult(
             status="failed",
+            provider=provider,
             message=f"Unsupported OCR provider: {provider}.",
         )
-    return _extract_tesseract_readings(content)
+    result = _extract_tesseract_readings(content)
+    try:
+        lcd = recognize_piusi_lcd(content)
+    except (
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+        cv2.error,
+    ) as error:
+        return MeterOcrResult(
+            status="failed",
+            provider=provider,
+            message=f"Could not process the uploaded meter photo: {error}",
+        )
+    return _apply_piusi_evidence(result, lcd, provider)

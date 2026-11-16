@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, text
+from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base
@@ -48,6 +48,26 @@ class MeterPhoto(Base):
     ocr_cumulative_total_confidence: Mapped[float | None] = mapped_column(
         Float, nullable=True
     )
+    ocr_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ocr_current_fill_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    ocr_current_fill_decimal_position: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    ocr_cumulative_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    ocr_cumulative_total_decimal_position: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    ocr_current_fill_segment_confidence: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
+    ocr_cumulative_total_segment_confidence: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
+    ocr_warnings: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     current_fill_litres: Mapped[float | None] = mapped_column(Float, nullable=True)
     cumulative_total_litres: Mapped[float | None] = mapped_column(Float, nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(
