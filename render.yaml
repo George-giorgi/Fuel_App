@@ -1,10 +1,10 @@
 services:
   - type: web
     name: diesel-desk-api
-    runtime: python
+    runtime: docker
     plan: free
-    buildCommand: python -m pip install -r requirements.txt && apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng
-    startCommand: python -m alembic upgrade head && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     healthCheckPath: /healthz
     envVars:
       - key: FUEL_ENV
