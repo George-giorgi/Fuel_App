@@ -274,22 +274,23 @@ imported. The Render start command applies schema-only Alembic upgrades.
   photo and active vehicle record.
 - A private meter photo is required. The backend applies EXIF orientation,
   locates and rectifies the green LCD area, crops its two rows separately, and
-  uses OpenCV to classify seven-segment digits and search for each row's decimal
-  point. Google Cloud Vision remains the primary production OCR provider; the
-  backend requests both `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses
-  their text/bounds as additional evidence, and compares Vision digits with the
-  independent segment result. Tesseract remains an optional local fallback.
-- Decimal positions are never restored from fixed row formats or digit counts.
-  Raw digits and the independently detected decimal position are stored
-  separately. A missing decimal point, a Vision/segment disagreement, or an
-  uncertain display crop blocks automatic verification. Employees see the
-  original photo, provider/confidence/warnings, raw segment digits, and editable
-  Current Fill and Cumulative Total fields; they must check both values against
-  the photo before submitting. Confirmation values are parsed as `Decimal`
-  before the existing database/business-rule layer is used. Current fill is
-  flagged when it exceeds a configured tank capacity, and a lower cumulative
-  total is flagged for reset/replacement review without changing the existing
-  submission rules.
+  uses OpenCV to classify seven-segment digits. Current Fill keeps its decimal
+  reading; Cumulative Total uses the bottom row's digits in order and ignores
+  its decimal point, returning a whole-number litre reading. Google Cloud Vision
+  remains the primary production OCR provider; the backend requests both
+  `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses their text/bounds as
+  additional evidence, and compares Vision digits with the independent segment
+  result. Tesseract remains an optional local fallback.
+- Raw digits are stored separately from numeric readings, preserving leading
+  zeros as OCR evidence. An unclear/missing digit, a Vision/segment disagreement,
+  or an uncertain display crop requires manual review; the decimal point is
+  required only for Current Fill. Employees see the original photo,
+  provider/confidence/warnings, recognized digits, and editable readings. They
+  must check both values against the photo; Current Fill may be decimal, while
+  Cumulative Total must be entered as digits only. Confirmation values are
+  parsed as `Decimal` before verification. A lower cumulative total is accepted
+  into the transaction history but marked as a discrepancy for management
+  review; an administrator can record a reset or replacement event separately.
 - A labeled reference image and dataset instructions are in
   [`tests/datasets/piusi_k600_3`](./tests/datasets/piusi_k600_3). The reference
   fixture labels Current Fill `22.032` and Cumulative Total `26.1563`; its

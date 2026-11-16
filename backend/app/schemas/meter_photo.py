@@ -89,4 +89,9 @@ class MeterPhotoVerify(BaseModel):
             and not self.cumulative_total_litres.is_finite()
         ):
             raise ValueError("Meter readings must be finite numbers.")
+        if (
+            self.cumulative_total_litres is not None
+            and self.cumulative_total_litres.as_tuple().exponent < 0
+        ):
+            raise ValueError("Cumulative Total must be entered as whole litres.")
         return self

@@ -90,7 +90,6 @@ from backend.app.schemas.meter_photo import (
 from backend.app.services.fuel_records import (
     FuelSubmissionError,
     MeterPhotoNotOwned,
-    MeterResetRequired,
     create_fuel_record as save_fuel_record,
 )
 from backend.app.schemas.vehicle import VehicleCreate, VehicleRead
@@ -1088,7 +1087,7 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.current_fill_litres, 5.0)
-        self.assertEqual(result.cumulative_total_litres, 9667.5)
+        self.assertEqual(result.cumulative_total_litres, 966750)
         self.assertNotEqual(
             result.current_fill_litres,
             result.cumulative_total_litres,
@@ -1108,7 +1107,7 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.current_fill_litres, 8.25)
-        self.assertEqual(result.cumulative_total_litres, 1340.75)
+        self.assertEqual(result.cumulative_total_litres, 134075)
 
     def test_low_confidence_or_missing_second_reading_is_uncertain(self) -> None:
         low_confidence = parse_meter_ocr_data(
@@ -1539,7 +1538,7 @@ class DatabaseTests(unittest.TestCase):
         expected = MeterOcrResult(
             status="ready",
             current_fill_litres=12.5,
-            cumulative_total_litres=261563.0,
+            cumulative_total_litres=261563,
             current_fill_confidence=99,
             cumulative_total_confidence=99,
         )
@@ -1638,7 +1637,7 @@ class DatabaseTests(unittest.TestCase):
                     ),
                 )
             second_photo = self._create_verified_meter_photo(
-                session, employee, vehicle, 5.0, 105.05
+                    session, employee, vehicle, 5.0, 105.0
             )
             with patch.dict(os.environ, {"FUEL_METER_TOLERANCE_LITRES": "0.10"}):
                 second_record = save_fuel_record(
@@ -1667,11 +1666,11 @@ class DatabaseTests(unittest.TestCase):
             ).model_dump(by_alias=True)
 
         self.assertEqual(first_values, (10.0, 10.0, 100.0, "baseline"))
-        self.assertEqual(second_values[:3], (5.0, 5.0, 105.05))
-        self.assertAlmostEqual(second_values[3], 5.05)
+        self.assertEqual(second_values[:3], (5.0, 5.0, 105.0))
+        self.assertEqual(second_values[3], 5.0)
         self.assertEqual(second_values[4], "matched")
         self.assertEqual(response_data["currentFillLitres"], 5.0)
-        self.assertEqual(response_data["cumulativeTotalLitres"], 105.05)
+        self.assertEqual(response_data["cumulativeTotalLitres"], 105.0)
         self.assertEqual(response_data["mileageMiles"], 1100.0)
         self.assertEqual(response_data["currentOdometerMiles"], 1100.0)
 
@@ -1823,7 +1822,7 @@ class DatabaseTests(unittest.TestCase):
                 ),
             )
             emma2_photo = self._create_verified_meter_photo(
-                session, emma2, emma2_vehicle, 7.5, 9662.5
+                session, emma2, emma2_vehicle, 7.5, 9663.0
             )
             emma2_record = save_fuel_record(
                 session,
@@ -1848,17 +1847,17 @@ class DatabaseTests(unittest.TestCase):
                 state.revision,
             )
 
-        self.assertEqual(values, (9662.5, 9655.0, emma2_record_id, 2))
+        self.assertEqual(values, (9663.0, 9655.0, emma2_record_id, 2))
         self.assertEqual(summary["last_employee_name"], "Tommy2")
         self.assertEqual(summary["last_vehicle_registration"], "DD-TOMMY-002")
         self.assertEqual(summary["last_meter_photo_id"], emma2_photo_id)
         self.assertEqual(history[0]["id"], f"fill-{emma2_record_id}")
-        self.assertEqual(history[0]["difference_litres"], 7.5)
+        self.assertEqual(history[0]["difference_litres"], 8.0)
         self.assertEqual(history[0]["notes"], f"global-meter-test:Tommy2:{emma2_photo_id}")
         self.assertTrue(emma_record_is_demo)
         self.assertTrue(emma2_record_is_demo)
 
-    def test_global_meter_lower_reading_requires_authorized_global_reset(self) -> None:
+    def test_global_meter_lower_reading_is_flagged_and_can_be_reviewed(self) -> None:
         with Session(self.engine) as session, session.begin():
             employee = create_employee(
                 session, "global-reset@example.test", "Global Reset Worker",
@@ -1885,17 +1884,24 @@ class DatabaseTests(unittest.TestCase):
             lower_photo = self._create_verified_meter_photo(
                 session, employee, vehicle, 1.0, 99.0
             )
-            with self.assertRaises(MeterResetRequired):
-                save_fuel_record(
-                    session,
-                    employee,
-                    FuelRecordCreate(
-                        meter_photo_id=lower_photo.id,
-                        odometer_miles=1100,
-                    ),
+            self.assertTrue(
+                any(
+                    "below the previous accepted reading" in warning
+                    for warning in lower_photo.ocr_warnings
                 )
+            )
+            lower_record = save_fuel_record(
+                session,
+                employee,
+                FuelRecordCreate(
+                    meter_photo_id=lower_photo.id,
+                    odometer_miles=1100,
+                )
+            )
+            self.assertEqual(lower_record.meter_delta_litres, -1.0)
+            self.assertEqual(lower_record.meter_check_status, "discrepancy")
             state = get_or_create_global_meter_state(session)
-            self.assertEqual(state.current_cumulative_total_litres, 100.0)
+            self.assertEqual(state.current_cumulative_total_litres, 99.0)
 
             event = create_global_meter_event(
                 session,
@@ -2034,7 +2040,7 @@ class DatabaseTests(unittest.TestCase):
                 ocr_result=MeterOcrResult(
                     status="uncertain",
                     current_fill_litres=7.5,
-                    cumulative_total_litres=107.5,
+                    cumulative_total_litres=107,
                     current_fill_confidence=30,
                     cumulative_total_confidence=98,
                     message="Current reading is unclear.",
@@ -2049,11 +2055,27 @@ class DatabaseTests(unittest.TestCase):
                         "currentFillLitres": 7.5,
                     }
                 )
+            with self.assertRaises(ValueError):
+                MeterPhotoVerify.model_validate(
+                    {
+                        "confirmed": True,
+                        "currentFillLitres": "7.5",
+                        "cumulativeTotalLitres": "107.5",
+                    }
+                )
+            with self.assertRaises(InvalidMeterVerification):
+                verify_meter_photo(
+                    session,
+                    employee,
+                    photo.id,
+                    Decimal("7.5"),
+                    Decimal("107.5"),
+                )
             request = MeterPhotoVerify.model_validate(
                 {
                     "confirmed": True,
                     "currentFillLitres": "7.5",
-                    "cumulativeTotalLitres": "107.5",
+                    "cumulativeTotalLitres": "107",
                 }
             )
             verified = verify_meter_photo(
@@ -2064,7 +2086,7 @@ class DatabaseTests(unittest.TestCase):
                 request.cumulative_total_litres,
             )
             self.assertEqual(verified.current_fill_litres, 7.5)
-            self.assertEqual(verified.cumulative_total_litres, 107.5)
+            self.assertEqual(verified.cumulative_total_litres, 107.0)
             self.assertEqual(verified.verification_method, "manual_correction")
             with self.assertRaises(ValueError):
                 FuelRecordCreate.model_validate(
@@ -2079,6 +2101,44 @@ class DatabaseTests(unittest.TestCase):
                 FuelRecordCreate.model_validate(
                     {"meterPhotoId": photo.id, "odometerKm": 1000}
                 )
+
+    def test_legacy_fractional_ocr_total_requires_whole_number_confirmation(
+        self,
+    ) -> None:
+        with Session(self.engine) as session, session.begin():
+            employee = create_employee(
+                session,
+                "legacy-total@example.test",
+                "Legacy Total Worker",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "lt12 old")
+            employee.vehicles.append(vehicle)
+            photo = self._create_verified_meter_photo(
+                session,
+                employee,
+                vehicle,
+                7.5,
+                261563,
+                verify=False,
+            )
+            photo.ocr_cumulative_total_litres = 26.1563
+            photo.ocr_cumulative_total_raw_digits = "261563"
+
+            with self.assertRaises(InvalidMeterVerification):
+                verify_meter_photo(session, employee, photo.id)
+            self.assertIsNone(photo.verified_at)
+
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                Decimal("7.5"),
+                Decimal("261563"),
+            )
+
+            self.assertEqual(verified.cumulative_total_litres, 261563)
+            self.assertEqual(verified.verification_method, "manual_correction")
 
     def test_manual_readings_warn_for_capacity_and_lower_total_without_rejecting(
         self,
@@ -2351,8 +2411,9 @@ class DatabaseTests(unittest.TestCase):
                 meter_photo_id=reset_photo.id,
                 odometer_miles=1200,
             )
-            with self.assertRaises(MeterResetRequired):
-                save_fuel_record(session, employee, request)
+            lower_record = save_fuel_record(session, employee, request)
+            self.assertLess(lower_record.meter_delta_litres, 0)
+            self.assertEqual(lower_record.meter_check_status, "discrepancy")
 
             event = create_global_meter_event(
                 session,
@@ -2361,7 +2422,17 @@ class DatabaseTests(unittest.TestCase):
                 0.0,
                 "The shared PIUSI meter was reset for testing.",
             )
-            after_reset = save_fuel_record(session, employee, request)
+            after_reset_photo = self._create_verified_meter_photo(
+                session, employee, vehicle, 2.0, 2.0
+            )
+            after_reset = save_fuel_record(
+                session,
+                employee,
+                FuelRecordCreate(
+                    meter_photo_id=after_reset_photo.id,
+                    odometer_miles=1300,
+                ),
+            )
             reset_values = (
                 after_reset.meter_epoch,
                 after_reset.meter_delta_litres,

@@ -42,7 +42,7 @@ _GOOGLE_VISION_MIN_CONFIDENCE = 80.0
 class MeterOcrResult:
     status: str
     current_fill_litres: float | None = None
-    cumulative_total_litres: float | None = None
+    cumulative_total_litres: int | None = None
     current_fill_confidence: float | None = None
     cumulative_total_confidence: float | None = None
     message: str | None = None
@@ -97,6 +97,17 @@ def _raw_digits_and_decimal_position(value: str) -> tuple[str | None, int | None
     return digits, before
 
 
+def _whole_number_from_digits(digits: str | None) -> int | None:
+    if not digits or not digits.isascii() or not digits.isdigit():
+        return None
+    return int(digits)
+
+
+def _ascii_digits(value: str) -> str | None:
+    digits = "".join(character for character in value if character in "0123456789")
+    return digits or None
+
+
 def _number_from_google_vision_words(
     numeric_words: list[tuple[str, float]],
 ) -> Decimal | None:
@@ -141,7 +152,14 @@ def parse_meter_ocr_data(
         )
         raw_digits, decimal_position = _raw_digits_and_decimal_position(raw_text)
         readings.append(
-            (int(line["top"]), number, confidence, raw_digits, decimal_position)
+            (
+                int(line["top"]),
+                number,
+                confidence,
+                raw_text,
+                raw_digits,
+                decimal_position,
+            )
         )
 
     readings.sort(key=lambda reading: reading[0])
@@ -158,28 +176,42 @@ def parse_meter_ocr_data(
         _,
         current_fill,
         current_confidence,
+        _,
         current_raw_digits,
         current_decimal_position,
     ) = readings[0]
     (
         _,
-        cumulative_total,
+        _,
         cumulative_confidence,
-        total_raw_digits,
-        total_decimal_position,
+        total_text,
+        _,
+        _,
     ) = readings[1]
+    total_raw_digits = _ascii_digits(total_text)
+    cumulative_total = _whole_number_from_digits(total_raw_digits)
     if current_fill <= 0:
         return MeterOcrResult(
             status="uncertain",
             current_fill_litres=float(current_fill),
-            cumulative_total_litres=float(cumulative_total),
+            cumulative_total_litres=cumulative_total,
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=cumulative_confidence,
             message="The first-line fill was read as zero; check the PIUSI display.",
             current_fill_raw_digits=current_raw_digits,
             current_fill_decimal_position=current_decimal_position,
             cumulative_total_raw_digits=total_raw_digits,
-            cumulative_total_decimal_position=total_decimal_position,
+        )
+    if cumulative_total is None:
+        return MeterOcrResult(
+            status="uncertain",
+            current_fill_litres=float(current_fill),
+            current_fill_confidence=current_confidence,
+            cumulative_total_confidence=cumulative_confidence,
+            message="Could not read all cumulative-total digits. Review the photo.",
+            current_fill_raw_digits=current_raw_digits,
+            current_fill_decimal_position=current_decimal_position,
+            cumulative_total_raw_digits=total_raw_digits,
         )
     confidences = (current_confidence, cumulative_confidence)
     if min(confidences) < min_confidence:
@@ -194,14 +226,13 @@ def parse_meter_ocr_data(
     return MeterOcrResult(
         status=status,
         current_fill_litres=float(current_fill),
-        cumulative_total_litres=float(cumulative_total),
+        cumulative_total_litres=cumulative_total,
         current_fill_confidence=current_confidence,
         cumulative_total_confidence=cumulative_confidence,
         message=message,
         current_fill_raw_digits=current_raw_digits,
         current_fill_decimal_position=current_decimal_position,
         cumulative_total_raw_digits=total_raw_digits,
-        cumulative_total_decimal_position=total_decimal_position,
     )
 
 
@@ -949,27 +980,24 @@ def _extract_google_vision_readings(
     _, current_text, current_confidence = current_reading
     _, total_text, total_confidence = total_readings[0]
     display_total = display_readings[1] if len(display_readings) > 1 else None
-    display_total_value = (
-        _number_from_token(display_total[1])
+    display_total_digits = (
+        _ascii_digits(display_total[1])
         if display_total is not None
         else None
     )
-    total_value = _number_from_token(total_text)
+    total_digits = _ascii_digits(total_text)
     if (
-        display_total_value is not None
-        and total_value is not None
-        and abs(display_total_value - total_value) > Decimal("0.00005")
+        display_total_digits is not None
+        and total_digits is not None
+        and display_total_digits != total_digits
     ):
         current_raw_digits, current_decimal_position = (
             _raw_digits_and_decimal_position(current_text)
         )
-        total_raw_digits, total_decimal_position = (
-            _raw_digits_and_decimal_position(total_text)
-        )
         return MeterOcrResult(
             status="uncertain",
             current_fill_litres=float(current_text),
-            cumulative_total_litres=float(total_text),
+            cumulative_total_litres=_whole_number_from_digits(total_digits),
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=total_confidence,
             message=(
@@ -978,8 +1006,7 @@ def _extract_google_vision_readings(
             ),
             current_fill_raw_digits=current_raw_digits,
             current_fill_decimal_position=current_decimal_position,
-            cumulative_total_raw_digits=total_raw_digits,
-            cumulative_total_decimal_position=total_decimal_position,
+            cumulative_total_raw_digits=total_digits,
         )
 
     result = parse_meter_ocr_data(
@@ -1165,19 +1192,13 @@ def _apply_piusi_evidence(
                 f"Google Vision and seven-segment recognition disagree on the {row_name} digits."
             )
         if (
-            segment_row.decimal_position is not None
+            row_name == "current-fill"
+            and segment_row.decimal_position is not None
             and (
                 vision_digits == segment_row.raw_digits
-                and (
-                    (row_name == "current-fill"
-                     and result.current_fill_decimal_position is not None
-                     and result.current_fill_decimal_position
-                     != segment_row.decimal_position)
-                    or (row_name == "cumulative-total"
-                        and result.cumulative_total_decimal_position is not None
-                        and result.cumulative_total_decimal_position
-                        != segment_row.decimal_position)
-                )
+                and result.current_fill_decimal_position is not None
+                and result.current_fill_decimal_position
+                != segment_row.decimal_position
             )
         ):
             warnings.append(
@@ -1186,8 +1207,6 @@ def _apply_piusi_evidence(
 
     if current.decimal_position is None:
         warnings.append("The current-fill decimal point needs manual confirmation.")
-    if total.decimal_position is None:
-        warnings.append("The cumulative-total decimal point needs manual confirmation.")
 
     current_digits_match = (
         current.raw_digits is not None
@@ -1206,14 +1225,10 @@ def _apply_piusi_evidence(
             else None
         )
     )
-    total_value = (
-        float(total.value)
-        if total_digits_match and total.value is not None
-        else (
-            result.cumulative_total_litres
-            if result.cumulative_total_decimal_position is not None
-            else None
-        )
+    total_value = _whole_number_from_digits(
+        total.raw_digits
+        if total_digits_match
+        else result.cumulative_total_raw_digits
     )
     if not current_digits_match or not total_digits_match:
         if not current_digits_match:

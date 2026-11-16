@@ -42,10 +42,6 @@ class MeterPhotoNotVerified(FuelSubmissionError):
     pass
 
 
-class MeterResetRequired(FuelSubmissionError):
-    pass
-
-
 def get_fuel_records(session: Session, employee_id: int) -> list[FuelRecord]:
     return list_fuel_records(session, employee_id)
 
@@ -136,14 +132,11 @@ def create_fuel_record(
     meter_delta = (
         cumulative_total - previous_total if previous_total is not None else None
     )
-    if meter_delta is not None and meter_delta < 0:
-        raise MeterResetRequired(
-            "The cumulative total decreased. An administrator must record a "
-            "meter reset or replacement before this fill can be submitted."
-        )
 
     if meter_delta is None:
         meter_check_status = "baseline"
+    elif meter_delta < 0:
+        meter_check_status = "discrepancy"
     elif abs(meter_delta - meter_photo.current_fill_litres) <= (
         get_meter_tolerance_litres()
     ):

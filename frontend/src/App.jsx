@@ -398,11 +398,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
         ? ''
         : String(photo.ocrCurrentFillLitres)
     );
-    setCumulativeTotalDraft(
-      photo.ocrCumulativeTotalLitres == null
-        ? ''
-        : String(photo.ocrCumulativeTotalLitres)
-    );
+    setCumulativeTotalDraft(cumulativeTotalDraftValue(photo));
   }, [photo]);
 
   useEffect(() => {
@@ -708,15 +704,13 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                 <span>Cumulative Total</span>
               </span>
               <strong>
-                {formatLitres(photo.ocrCumulativeTotalLitres)} litres
+                {formatOcrCumulativeTotal(photo)}
                 {photo.ocrCumulativeTotalConfidence != null &&
                   ` (${Math.round(photo.ocrCumulativeTotalConfidence)}% confidence)`}
               </strong>
               <small>
-                Segment digits: {photo.ocrCumulativeTotalRawDigits || 'not detected'}.
-                Decimal: {photo.ocrCumulativeTotalDecimalPosition == null
-                  ? 'uncertain'
-                  : `after ${photo.ocrCumulativeTotalDecimalPosition} digits`}.
+                Digits only; decimal point ignored. Recognized digits:{' '}
+                {photo.ocrCumulativeTotalRawDigits || 'not detected'}.
                 {photo.ocrCumulativeTotalSegmentConfidence != null &&
                   ` Segment confidence ${Math.round(photo.ocrCumulativeTotalSegmentConfidence)}%.`}
               </small>
@@ -743,7 +737,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                   <AppIcon name="meter" size={14} />
                   <span>Verified Cumulative Total</span>
                 </span>
-                <strong>{formatLitres(photo.cumulativeTotalLitres)} litres</strong>
+                <strong>{formatCumulativeTotal(photo.cumulativeTotalLitres)} litres</strong>
               </div>
               <button
                 className="outline-button"
@@ -756,8 +750,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           ) : (
             <form className="meter-review-form" onSubmit={handleVerify}>
               <p>
-                Check both values against the original photo. Edit either reading
-                if OCR or decimal recognition is uncertain. Use a decimal point.
+                Check both values against the original photo. Current Fill may
+                include decimals; enter Cumulative Total as digits only, without
+                a decimal point. Review and correct any uncertain reading.
               </p>
               <label>
                 Current Fill (L)
@@ -775,12 +770,13 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                 Cumulative Total (L)
                 <input
                   type="text"
-                  inputMode="decimal"
+                  inputMode="numeric"
                   autoComplete="off"
+                  pattern="[0-9]+"
                   required
                   value={cumulativeTotalDraft}
                   onChange={(event) => setCumulativeTotalDraft(event.target.value)}
-                  placeholder="e.g. 26.1563"
+                  placeholder="e.g. 261563"
                 />
               </label>
               <label className="meter-confirmation">
@@ -1167,7 +1163,7 @@ function FuelForm({
                 <AppIcon name="meter" size={14} />
                 <span>Cumulative Total</span>
               </span>
-              <strong>{formatLitres(meterPhoto.cumulativeTotalLitres)} litres</strong>
+              <strong>{formatCumulativeTotal(meterPhoto.cumulativeTotalLitres)} litres</strong>
             </div>
           </div>
         )}
@@ -1358,6 +1354,31 @@ function formatLitres(value) {
   });
 }
 
+function formatCumulativeTotal(value) {
+  if (value == null) return 'Not recorded';
+  return String(value);
+}
+
+function formatOcrCumulativeTotal(photo) {
+  if (photo.ocrCumulativeTotalRawDigits) {
+    return `${photo.ocrCumulativeTotalRawDigits} litres`;
+  }
+  if (photo.ocrCumulativeTotalLitres == null) return 'Not recorded';
+  if (!Number.isInteger(photo.ocrCumulativeTotalLitres)) {
+    return 'Needs manual review';
+  }
+  return `${formatCumulativeTotal(photo.ocrCumulativeTotalLitres)} litres`;
+}
+
+function cumulativeTotalDraftValue(photo) {
+  if (photo.ocrCumulativeTotalRawDigits) {
+    return photo.ocrCumulativeTotalRawDigits;
+  }
+  return Number.isInteger(photo.ocrCumulativeTotalLitres)
+    ? String(photo.ocrCumulativeTotalLitres)
+    : '';
+}
+
 function downloadJson(value, filename) {
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
@@ -1393,7 +1414,7 @@ function emailReport(record) {
     `Mileage: ${formatMileage(record.mileageMiles)} mi`,
     `Tank capacity: ${record.capacity} litres`,
     `Current Fill: ${formatLitres(record.currentFillLitres ?? record.litres)} litres`,
-    `Cumulative Total: ${formatLitres(record.cumulativeTotalLitres)} litres`,
+    `Cumulative Total: ${formatCumulativeTotal(record.cumulativeTotalLitres)} litres`,
     `Cumulative difference: ${formatLitres(record.meterDeltaLitres)} litres`,
     `Meter check: ${record.meterCheckStatus}`,
     `Cost: ${record.cost != null ? formatCost(record.cost) : 'Not supplied'}`,
@@ -1455,7 +1476,7 @@ function HistorySection({
                   Current Fill: {formatLitres(record.currentFillLitres ?? record.litres)} litres
                 </small>
                 <small>
-                  Cumulative Total: {formatLitres(record.cumulativeTotalLitres)} litres
+                  Cumulative Total: {formatCumulativeTotal(record.cumulativeTotalLitres)} litres
                 </small>
                 {record.meterDeltaLitres !== null && (
                   <small>
@@ -1483,7 +1504,7 @@ function HistorySection({
                   </div>
                   <div>
                     <dt>Cumulative Total</dt>
-                    <dd>{formatLitres(record.cumulativeTotalLitres)} litres</dd>
+                    <dd>{formatCumulativeTotal(record.cumulativeTotalLitres)} litres</dd>
                   </div>
                   <div>
                     <dt>Meter comparison</dt>
@@ -1579,7 +1600,7 @@ function GlobalMeterDashboard({
           <strong>
             {summary?.currentCumulativeTotalLitres == null
               ? '--'
-              : formatLitres(summary.currentCumulativeTotalLitres)}
+              : formatCumulativeTotal(summary.currentCumulativeTotalLitres)}
             <span>L</span>
           </strong>
           <small>
@@ -1598,7 +1619,7 @@ function GlobalMeterDashboard({
             <dd>
               {summary?.previousCumulativeTotalLitres == null
                 ? '--'
-                : `${formatLitres(summary.previousCumulativeTotalLitres)} L`}
+                : `${formatCumulativeTotal(summary.previousCumulativeTotalLitres)} L`}
             </dd>
           </div>
           <div>
@@ -1680,7 +1701,7 @@ function GlobalMeterDashboard({
                     {entry.isDemo && (
                       <span className="global-meter-demo-tag">DEMO / TEST</span>
                     )}
-                    <strong>{formatLitres(entry.cumulativeTotalLitres)} L</strong>
+                    <strong>{formatCumulativeTotal(entry.cumulativeTotalLitres)} L</strong>
                     <time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time>
                   </div>
                   <span className="global-meter-history-toggle">View details</span>
@@ -2031,7 +2052,7 @@ function DashboardSection({
                           <span>
                             Meter total:{' '}
                             {record.cumulativeTotalLitres != null
-                              ? `${formatLitres(record.cumulativeTotalLitres)} L`
+                              ? `${formatCumulativeTotal(record.cumulativeTotalLitres)} L`
                               : 'Not available'}
                           </span>
                         </span>

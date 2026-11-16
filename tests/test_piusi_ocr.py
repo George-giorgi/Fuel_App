@@ -1,6 +1,7 @@
-import json
-from decimal import Decimal
 import importlib
+import json
+from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 import unittest
 
@@ -15,6 +16,7 @@ from backend.app.services.meter_ocr import (
     MeterOcrResult,
     _apply_piusi_evidence,
     _google_vision_text_detection_disagrees,
+    parse_meter_ocr_data,
 )
 from backend.app.services.piusi_lcd import (
     recognize_piusi_lcd,
@@ -29,7 +31,7 @@ def _candidate_ocr_result() -> MeterOcrResult:
     return MeterOcrResult(
         status="ready",
         current_fill_litres=22.032,
-        cumulative_total_litres=26.1563,
+        cumulative_total_litres=261563,
         current_fill_confidence=96,
         cumulative_total_confidence=94,
         current_fill_raw_digits="22032",
@@ -40,7 +42,7 @@ def _candidate_ocr_result() -> MeterOcrResult:
 
 
 class PiusiOcrTests(unittest.TestCase):
-    def test_reference_reads_both_raw_rows_without_guessing_decimal_points(self) -> None:
+    def test_reference_reads_current_fill_and_whole_cumulative_total(self) -> None:
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
         example = labels["examples"][0]
         result = recognize_piusi_lcd(REFERENCE.read_bytes())
@@ -51,7 +53,7 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertIsNone(result.current_fill.decimal_position)
         self.assertIsNone(result.cumulative_total.decimal_position)
         self.assertIsNone(result.current_fill.value)
-        self.assertIsNone(result.cumulative_total.value)
+        self.assertEqual(result.cumulative_total.value, 261563)
         self.assertEqual(
             Decimal(
                 f"{example['current_fill_raw_digits'][:example['current_fill_decimal_position']]}."
@@ -70,7 +72,93 @@ class PiusiOcrTests(unittest.TestCase):
             _candidate_ocr_result(), result, "google_vision"
         )
         self.assertEqual(reconciled.status, "uncertain")
-        self.assertIn("decimal point", reconciled.message)
+        self.assertEqual(reconciled.cumulative_total_litres, 261563)
+        self.assertIn("current-fill decimal point", reconciled.message)
+        self.assertNotIn("cumulative-total decimal point", reconciled.message)
+
+    def test_cumulative_row_uses_all_digits_ignoring_decimal_position(self) -> None:
+        lcd = recognize_piusi_lcd(REFERENCE.read_bytes())
+        lcd = replace(
+            lcd,
+            current_fill=replace(
+                lcd.current_fill,
+                decimal_position=2,
+                value=Decimal("22.032"),
+            ),
+            warnings=(),
+        )
+        for decimal_position in (None, 1, 2, 5):
+            candidate = replace(
+                _candidate_ocr_result(),
+                cumulative_total_decimal_position=decimal_position,
+            )
+            result = _apply_piusi_evidence(candidate, lcd, "google_vision")
+
+            self.assertEqual(result.status, "ready")
+            self.assertEqual(result.current_fill_litres, 22.032)
+            self.assertEqual(result.cumulative_total_litres, 261563)
+            self.assertIsNone(result.cumulative_total_decimal_position)
+
+    def test_cumulative_parser_ignores_decimals_and_preserves_leading_zeros(
+        self,
+    ) -> None:
+        examples = (
+            ("26.1563", "261563"),
+            ("261563", "261563"),
+            ("00.1234", "001234"),
+            ("2.61563", "261563"),
+            ("2615.63", "261563"),
+            ("26.15x63 L", "261563"),
+        )
+        for text, expected_digits in examples:
+            with self.subTest(text=text):
+                result = parse_meter_ocr_data(
+                    {
+                        "text": ["22.032", text],
+                        "conf": ["96", "94"],
+                        "top": ["100", "140"],
+                        "block_num": ["1", "1"],
+                        "par_num": ["1", "1"],
+                        "line_num": ["1", "2"],
+                    }
+                )
+                self.assertEqual(result.current_fill_litres, 22.032)
+                self.assertEqual(result.cumulative_total_litres, int(expected_digits))
+                self.assertEqual(result.cumulative_total_raw_digits, expected_digits)
+                self.assertIsNone(result.cumulative_total_decimal_position)
+
+    def test_missing_cumulative_digit_requires_manual_review(self) -> None:
+        lcd = recognize_piusi_lcd(REFERENCE.read_bytes())
+        result = _apply_piusi_evidence(
+            replace(
+                _candidate_ocr_result(),
+                cumulative_total_raw_digits="26163",
+            ),
+            lcd,
+            "google_vision",
+        )
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertIn("cumulative-total digits need manual review", result.message)
+
+    def test_blurry_cumulative_digits_require_manual_review(self) -> None:
+        original = cv2.imread(str(REFERENCE))
+        blurred = cv2.GaussianBlur(original, (31, 31), 0)
+        success, encoded = cv2.imencode(".jpg", blurred)
+        self.assertTrue(success)
+
+        lcd = recognize_piusi_lcd(encoded.tobytes())
+        result = _apply_piusi_evidence(
+            _candidate_ocr_result(),
+            lcd,
+            "google_vision",
+        )
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertTrue(
+            result.cumulative_total_litres is None
+            or any("cumulative-total" in warning for warning in result.warnings)
+        )
 
     def test_vision_segment_disagreement_requires_manual_review(self) -> None:
         lcd = recognize_piusi_lcd(REFERENCE.read_bytes())
@@ -144,13 +232,13 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertIsNone(result.current_fill_litres)
         self.assertIsNone(result.cumulative_total_litres)
 
-    def test_missing_decimal_prevents_numeric_output(self) -> None:
+    def test_missing_current_decimal_requires_manual_review(self) -> None:
         lcd = recognize_piusi_lcd(REFERENCE.read_bytes())
         result = _apply_piusi_evidence(
             MeterOcrResult(
                 status="ready",
                 current_fill_litres=22032.0,
-                cumulative_total_litres=261563.0,
+                cumulative_total_litres=261563,
                 current_fill_confidence=96,
                 cumulative_total_confidence=94,
                 current_fill_raw_digits="22032",
@@ -162,7 +250,7 @@ class PiusiOcrTests(unittest.TestCase):
 
         self.assertEqual(result.status, "uncertain")
         self.assertIsNone(result.current_fill_litres)
-        self.assertIsNone(result.cumulative_total_litres)
+        self.assertEqual(result.cumulative_total_litres, 261563)
 
     def test_metadata_migration_is_additive_on_sqlite(self) -> None:
         migration = importlib.import_module(

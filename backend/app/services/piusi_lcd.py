@@ -38,7 +38,7 @@ _SEGMENT_REGIONS = {
 class LcdRowReading:
     raw_digits: str | None
     decimal_position: int | None
-    value: Decimal | None
+    value: Decimal | int | None
     confidence: float | None
 
 
@@ -244,9 +244,11 @@ def _classify_glyph(
     offset_x: int,
     offset_y: int,
     segment_threshold: float,
+    *,
+    force_narrow_one: bool = True,
 ) -> tuple[str | None, float]:
     _, _, width, height = box
-    if width / max(height, 1) < 0.31:
+    if force_narrow_one and width / max(height, 1) < 0.31:
         return "1", 0.72
     occupancy = _glyph_occupancy(mask, box, offset_x, offset_y)
     active = {
@@ -306,6 +308,7 @@ def _recognize_row(
     minimum_digits: int,
     split_wide_glyphs: bool,
     segment_threshold: float,
+    whole_number: bool = False,
 ) -> LcdRowReading:
     height, width = display.shape[:2]
     left, top, right, bottom = bounds
@@ -332,23 +335,37 @@ def _recognize_row(
     ]
     boxes.sort(key=lambda box: box[0])
     classified = [
-        _classify_glyph(mask, box, x1, y1, segment_threshold)
+        _classify_glyph(
+            mask,
+            box,
+            x1,
+            y1,
+            segment_threshold,
+            force_narrow_one=not whole_number,
+        )
         for box in boxes
     ]
-    if len(classified) < minimum_digits or any(digit is None for digit, _ in classified):
+    if (
+        len(classified) < minimum_digits
+        or any(digit is None for digit, _ in classified)
+        or (
+            whole_number
+            and any(score < 0.65 for _, score in classified)
+        )
+    ):
         return LcdRowReading(None, None, None, None)
 
     raw_digits = "".join(digit for digit, _ in classified if digit is not None)
     confidence = sum(score for _, score in classified) / len(classified)
-    decimal_position = _decimal_position(
-        mask,
-        boxes,
-        x1,
-        y1,
-        row_height,
+    decimal_position = (
+        None
+        if whole_number
+        else _decimal_position(mask, boxes, x1, y1, row_height)
     )
     value = None
-    if decimal_position is not None and 0 < decimal_position < len(raw_digits):
+    if whole_number:
+        value = int(raw_digits)
+    elif decimal_position is not None and 0 < decimal_position < len(raw_digits):
         try:
             value = Decimal(
                 f"{raw_digits[:decimal_position]}.{raw_digits[decimal_position:]}"
@@ -395,6 +412,7 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         minimum_digits=4,
         split_wide_glyphs=True,
         segment_threshold=0.45,
+        whole_number=True,
     )
     warnings = []
     if current.raw_digits is None:
@@ -403,8 +421,6 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         warnings.append("Seven-segment recognition could not read the TOTAL row.")
     if current.decimal_position is None:
         warnings.append("The current-fill decimal point is uncertain.")
-    if total.decimal_position is None:
-        warnings.append("The cumulative-total decimal point is uncertain.")
     return PiusiLcdRecognition(
         True,
         current,

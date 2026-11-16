@@ -310,6 +310,13 @@ def verify_meter_photo(
         raise InvalidMeterVerification(
             "Enter both meter readings or neither."
         )
+    if (
+        cumulative_total_litres is not None
+        and cumulative_total_litres.as_tuple().exponent < 0
+    ):
+        raise InvalidMeterVerification(
+            "Cumulative Total must be entered as whole litres."
+        )
     if current_fill_litres is not None and cumulative_total_litres is not None:
         if (
             not current_fill_litres.is_finite()
@@ -342,6 +349,7 @@ def verify_meter_photo(
             or meter_photo.ocr_cumulative_total_litres < 0
             or not math.isfinite(meter_photo.ocr_current_fill_litres)
             or not math.isfinite(meter_photo.ocr_cumulative_total_litres)
+            or not float(meter_photo.ocr_cumulative_total_litres).is_integer()
         ):
             raise InvalidMeterVerification(
                 "OCR readings are missing or uncertain. Enter both values after "

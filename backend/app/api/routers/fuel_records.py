@@ -14,7 +14,6 @@ from backend.app.services.fuel_records import (
     FuelSubmissionError,
     MeterPhotoNotOwned,
     MeterPhotoNotVerified,
-    MeterResetRequired,
     create_fuel_record as save_fuel_record,
 )
 from backend.app.services.global_meter import GlobalMeterConcurrentUpdate
@@ -42,8 +41,6 @@ def create_fuel_record(
     except MeterPhotoNotOwned as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except MeterPhotoNotVerified as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
-    except MeterResetRequired as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except GlobalMeterConcurrentUpdate as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
