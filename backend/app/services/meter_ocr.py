@@ -41,7 +41,7 @@ _GOOGLE_VISION_MIN_CONFIDENCE = 80.0
 @dataclass(frozen=True)
 class MeterOcrResult:
     status: str
-    current_fill_litres: float | None = None
+    current_fill_litres: int | None = None
     cumulative_total_litres: int | None = None
     current_fill_confidence: float | None = None
     cumulative_total_confidence: float | None = None
@@ -174,11 +174,11 @@ def parse_meter_ocr_data(
 
     (
         _,
-        current_fill,
+        _,
         current_confidence,
         _,
         current_raw_digits,
-        current_decimal_position,
+        _,
     ) = readings[0]
     (
         _,
@@ -188,29 +188,32 @@ def parse_meter_ocr_data(
         _,
         _,
     ) = readings[1]
+    current_fill = _whole_number_from_digits(current_raw_digits)
     total_raw_digits = _ascii_digits(total_text)
     cumulative_total = _whole_number_from_digits(total_raw_digits)
-    if current_fill <= 0:
+    if current_fill is None or current_fill <= 0:
         return MeterOcrResult(
             status="uncertain",
-            current_fill_litres=float(current_fill),
+            current_fill_litres=current_fill,
             cumulative_total_litres=cumulative_total,
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=cumulative_confidence,
-            message="The first-line fill was read as zero; check the PIUSI display.",
+            message=(
+                "Could not read all current-fill digits. Review the photo."
+                if current_fill is None
+                else "The first-line fill was read as zero; check the PIUSI display."
+            ),
             current_fill_raw_digits=current_raw_digits,
-            current_fill_decimal_position=current_decimal_position,
             cumulative_total_raw_digits=total_raw_digits,
         )
     if cumulative_total is None:
         return MeterOcrResult(
             status="uncertain",
-            current_fill_litres=float(current_fill),
+            current_fill_litres=current_fill,
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=cumulative_confidence,
             message="Could not read all cumulative-total digits. Review the photo.",
             current_fill_raw_digits=current_raw_digits,
-            current_fill_decimal_position=current_decimal_position,
             cumulative_total_raw_digits=total_raw_digits,
         )
     confidences = (current_confidence, cumulative_confidence)
@@ -225,13 +228,12 @@ def parse_meter_ocr_data(
         status = "ready"
     return MeterOcrResult(
         status=status,
-        current_fill_litres=float(current_fill),
+        current_fill_litres=current_fill,
         cumulative_total_litres=cumulative_total,
         current_fill_confidence=current_confidence,
         cumulative_total_confidence=cumulative_confidence,
         message=message,
         current_fill_raw_digits=current_raw_digits,
-        current_fill_decimal_position=current_decimal_position,
         cumulative_total_raw_digits=total_raw_digits,
     )
 
@@ -991,12 +993,12 @@ def _extract_google_vision_readings(
         and total_digits is not None
         and display_total_digits != total_digits
     ):
-        current_raw_digits, current_decimal_position = (
+        current_raw_digits, _ = (
             _raw_digits_and_decimal_position(current_text)
         )
         return MeterOcrResult(
             status="uncertain",
-            current_fill_litres=float(current_text),
+            current_fill_litres=_whole_number_from_digits(current_raw_digits),
             cumulative_total_litres=_whole_number_from_digits(total_digits),
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=total_confidence,
@@ -1005,7 +1007,6 @@ def _extract_google_vision_readings(
                 "and close-up. Retake the photo."
             ),
             current_fill_raw_digits=current_raw_digits,
-            current_fill_decimal_position=current_decimal_position,
             cumulative_total_raw_digits=total_digits,
         )
 
@@ -1191,23 +1192,6 @@ def _apply_piusi_evidence(
             warnings.append(
                 f"Google Vision and seven-segment recognition disagree on the {row_name} digits."
             )
-        if (
-            row_name == "current-fill"
-            and segment_row.decimal_position is not None
-            and (
-                vision_digits == segment_row.raw_digits
-                and result.current_fill_decimal_position is not None
-                and result.current_fill_decimal_position
-                != segment_row.decimal_position
-            )
-        ):
-            warnings.append(
-                f"Google Vision and seven-segment recognition disagree on the {row_name} decimal point."
-            )
-
-    if current.decimal_position is None:
-        warnings.append("The current-fill decimal point needs manual confirmation.")
-
     current_digits_match = (
         current.raw_digits is not None
         and current.raw_digits == result.current_fill_raw_digits
@@ -1216,14 +1200,10 @@ def _apply_piusi_evidence(
         total.raw_digits is not None
         and total.raw_digits == result.cumulative_total_raw_digits
     )
-    current_value = (
-        float(current.value)
-        if current_digits_match and current.value is not None
-        else (
-            result.current_fill_litres
-            if result.current_fill_decimal_position is not None
-            else None
-        )
+    current_value = _whole_number_from_digits(
+        current.raw_digits
+        if current_digits_match
+        else result.current_fill_raw_digits
     )
     total_value = _whole_number_from_digits(
         total.raw_digits
@@ -1258,7 +1238,6 @@ def _apply_piusi_evidence(
         message=message,
         provider=provider,
         current_fill_raw_digits=current.raw_digits,
-        current_fill_decimal_position=current.decimal_position,
         cumulative_total_raw_digits=total.raw_digits,
         cumulative_total_decimal_position=total.decimal_position,
         current_fill_segment_confidence=(

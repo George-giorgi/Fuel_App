@@ -274,34 +274,32 @@ imported. The Render start command applies schema-only Alembic upgrades.
   photo and active vehicle record.
 - A private meter photo is required. The backend applies EXIF orientation,
   locates and rectifies the green LCD area, crops its two rows separately, and
-  uses OpenCV to classify seven-segment digits. Current Fill keeps its decimal
-  reading; Cumulative Total uses the bottom row's digits in order and ignores
-  its decimal point, returning a whole-number litre reading. The bottom-row
-  recognizer also checks locally adaptive grayscale masks for lighting/color
-  variation and requires six digits with matching mask results; otherwise it
-  asks for manual review. Google Cloud Vision
+  uses OpenCV to classify seven-segment digits. Both Current Fill and
+  Cumulative Total use all recognized digits and ignore decimal points,
+  returning whole-number litre readings. The bottom-row recognizer also checks
+  locally adaptive grayscale masks for lighting/color variation and requires
+  six digits with matching mask results; otherwise it asks for manual review.
+  Google Cloud Vision
   remains the primary production OCR provider; the backend requests both
   `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses their text/bounds as
   additional evidence, and compares Vision digits with the independent segment
-  result. Tesseract remains an optional local fallback.
+  result. Tesseract remains an optional local OCR provider.
 - Raw digits are stored separately from numeric readings, preserving leading
   zeros as OCR evidence. An unclear/missing digit, a Vision/segment disagreement,
-  or an uncertain display crop requires manual review; the decimal point is
-  required only for Current Fill. Employees see the original photo,
-  provider/confidence/warnings, recognized digits, and editable readings. They
-  must check both values against the photo; Current Fill may be decimal, while
-  Cumulative Total must be entered as digits only. Confirmation values are
-  parsed as `Decimal` before verification. A lower cumulative total is accepted
+  or an uncertain display crop requires manual review. Employees see the
+  original photo, provider/confidence/warnings, recognized digits, and editable
+  readings. They must check both whole-number values against the photo and enter
+  digits only. For example, the reference display's `22.032` and `26.1563`
+  become `22032` and `261563`; this is the configured interpretation, not a
+  decimal-position inference. Confirmation values are parsed as `Decimal`
+  before verification. A lower cumulative total is accepted
   into the transaction history but marked as a discrepancy for management
   review; an administrator can record a reset or replacement event separately.
 - A labeled reference image and dataset instructions are in
   [`tests/datasets/piusi_k600_3`](./tests/datasets/piusi_k600_3). The reference
-  fixture labels Current Fill `22.032` and Cumulative Total `26.1563`; its
-  decimal dots are not confidently visible to the segment detector, so the
-  correct automated outcome is manual review rather than a guessed ready
-  reading. This single photo does not establish general accuracy. Add further
-  independently labeled, non-transaction photos there before assessing
-  accuracy.
+  fixture labels the display's raw digits as `22032` and `261563`. This single
+  photo does not establish general accuracy. Add further independently labeled,
+  non-transaction photos there before assessing accuracy.
 - The Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to

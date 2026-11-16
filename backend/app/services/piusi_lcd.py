@@ -309,6 +309,10 @@ def _recognize_row(
     split_wide_glyphs: bool,
     segment_threshold: float,
     whole_number: bool = False,
+    expected_digits: int | None = None,
+    mask_right_fraction: float | None = None,
+    adaptive_masks: bool = True,
+    minimum_agreeing_masks: int = 2,
 ) -> LcdRowReading:
     height, width = display.shape[:2]
     left, top, right, bottom = bounds
@@ -348,7 +352,10 @@ def _recognize_row(
         ]
         if (
             len(classified) < minimum_digits
-            or (whole_number and len(classified) != 6)
+            or (
+                expected_digits is not None
+                and len(classified) != expected_digits
+            )
             or any(digit is None for digit, _ in classified)
             or (
                 whole_number
@@ -379,7 +386,7 @@ def _recognize_row(
         return LcdRowReading(raw_digits, decimal_position, value, confidence)
 
     masks = [cv2.inRange(hsv, _SEGMENT_HSV_LOW, _SEGMENT_HSV_HIGH)]
-    if whole_number:
+    if whole_number and adaptive_masks:
         gray = cv2.cvtColor(row, cv2.COLOR_BGR2GRAY)
         for scale in (0.52, 0.55):
             block_size = max(15, round(row_height * scale))
@@ -398,8 +405,8 @@ def _recognize_row(
                 block_size,
                 2,
             )
-            # The right side contains the TOTAL label and unit, not digits.
-            mask[:, round(mask.shape[1] * 0.71) :] = 0
+            if mask_right_fraction is not None:
+                mask[:, round(mask.shape[1] * mask_right_fraction) :] = 0
             masks.append(mask)
 
     readings = [
@@ -408,7 +415,10 @@ def _recognize_row(
         if (reading := recognize_mask(mask)) is not None
     ]
     if whole_number:
-        if len(readings) < 2 or len({r.raw_digits for r in readings}) != 1:
+        if (
+            len(readings) < minimum_agreeing_masks
+            or len({r.raw_digits for r in readings}) != 1
+        ):
             return LcdRowReading(None, None, None, None)
         return max(readings, key=lambda reading: reading.confidence or 0)
     if not readings:
@@ -446,6 +456,9 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         minimum_digits=3,
         split_wide_glyphs=False,
         segment_threshold=0.35,
+        whole_number=True,
+        adaptive_masks=False,
+        minimum_agreeing_masks=1,
     )
     total = _recognize_row(
         display,
@@ -454,14 +467,14 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         split_wide_glyphs=True,
         segment_threshold=0.45,
         whole_number=True,
+        expected_digits=6,
+        mask_right_fraction=0.71,
     )
     warnings = []
     if current.raw_digits is None:
         warnings.append("Seven-segment recognition could not read the top row.")
     if total.raw_digits is None:
         warnings.append("Seven-segment recognition could not read the TOTAL row.")
-    if current.decimal_position is None:
-        warnings.append("The current-fill decimal point is uncertain.")
     return PiusiLcdRecognition(
         True,
         current,

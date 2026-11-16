@@ -1086,7 +1086,7 @@ class DatabaseTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 5.0)
+        self.assertEqual(result.current_fill_litres, 500)
         self.assertEqual(result.cumulative_total_litres, 966750)
         self.assertNotEqual(
             result.current_fill_litres,
@@ -1106,7 +1106,7 @@ class DatabaseTests(unittest.TestCase):
         )
 
         self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 8.25)
+        self.assertEqual(result.current_fill_litres, 825)
         self.assertEqual(result.cumulative_total_litres, 134075)
 
     def test_low_confidence_or_missing_second_reading_is_uncertain(self) -> None:
@@ -1537,7 +1537,7 @@ class DatabaseTests(unittest.TestCase):
     def test_local_defaults_to_google_vision_when_key_is_configured(self) -> None:
         expected = MeterOcrResult(
             status="ready",
-            current_fill_litres=12.5,
+            current_fill_litres=125,
             cumulative_total_litres=261563,
             current_fill_confidence=99,
             cumulative_total_confidence=99,
@@ -1822,7 +1822,7 @@ class DatabaseTests(unittest.TestCase):
                 ),
             )
             emma2_photo = self._create_verified_meter_photo(
-                session, emma2, emma2_vehicle, 7.5, 9663.0
+                session, emma2, emma2_vehicle, 8.0, 9663.0
             )
             emma2_record = save_fuel_record(
                 session,
@@ -2035,11 +2035,11 @@ class DatabaseTests(unittest.TestCase):
                 session,
                 employee,
                 vehicle,
-                7.5,
-                107.5,
+                75,
+                107,
                 ocr_result=MeterOcrResult(
                     status="uncertain",
-                    current_fill_litres=7.5,
+                    current_fill_litres=75,
                     cumulative_total_litres=107,
                     current_fill_confidence=30,
                     cumulative_total_confidence=98,
@@ -2052,15 +2052,15 @@ class DatabaseTests(unittest.TestCase):
                 MeterPhotoVerify.model_validate(
                     {
                         "confirmed": True,
-                        "currentFillLitres": 7.5,
+                        "currentFillLitres": 75,
                     }
                 )
             with self.assertRaises(ValueError):
                 MeterPhotoVerify.model_validate(
                     {
                         "confirmed": True,
-                        "currentFillLitres": "7.5",
-                        "cumulativeTotalLitres": "107.5",
+                        "currentFillLitres": "75.5",
+                        "cumulativeTotalLitres": "107",
                     }
                 )
             with self.assertRaises(InvalidMeterVerification):
@@ -2068,13 +2068,21 @@ class DatabaseTests(unittest.TestCase):
                     session,
                     employee,
                     photo.id,
-                    Decimal("7.5"),
-                    Decimal("107.5"),
+                    Decimal("75.5"),
+                    Decimal("107"),
+                )
+            with self.assertRaises(ValueError):
+                MeterPhotoVerify.model_validate(
+                    {
+                        "confirmed": True,
+                        "currentFillLitres": "75",
+                        "cumulativeTotalLitres": "107.5",
+                    }
                 )
             request = MeterPhotoVerify.model_validate(
                 {
                     "confirmed": True,
-                    "currentFillLitres": "7.5",
+                    "currentFillLitres": "75",
                     "cumulativeTotalLitres": "107",
                 }
             )
@@ -2085,7 +2093,7 @@ class DatabaseTests(unittest.TestCase):
                 request.current_fill_litres,
                 request.cumulative_total_litres,
             )
-            self.assertEqual(verified.current_fill_litres, 7.5)
+            self.assertEqual(verified.current_fill_litres, 75.0)
             self.assertEqual(verified.cumulative_total_litres, 107.0)
             self.assertEqual(verified.verification_method, "manual_correction")
             with self.assertRaises(ValueError):
@@ -2101,6 +2109,44 @@ class DatabaseTests(unittest.TestCase):
                 FuelRecordCreate.model_validate(
                     {"meterPhotoId": photo.id, "odometerKm": 1000}
                 )
+
+    def test_legacy_fractional_ocr_current_fill_requires_whole_number_confirmation(
+        self,
+    ) -> None:
+        with Session(self.engine) as session, session.begin():
+            employee = create_employee(
+                session,
+                "legacy-fill@example.test",
+                "Legacy Fill Worker",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "lf12 old")
+            employee.vehicles.append(vehicle)
+            photo = self._create_verified_meter_photo(
+                session,
+                employee,
+                vehicle,
+                22032,
+                261563,
+                verify=False,
+            )
+            photo.ocr_current_fill_litres = 22.032
+            photo.ocr_current_fill_raw_digits = "22032"
+
+            with self.assertRaises(InvalidMeterVerification):
+                verify_meter_photo(session, employee, photo.id)
+            self.assertIsNone(photo.verified_at)
+
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                Decimal("22032"),
+                Decimal("261563"),
+            )
+
+            self.assertEqual(verified.current_fill_litres, 22032)
+            self.assertEqual(verified.verification_method, "manual_correction")
 
     def test_legacy_fractional_ocr_total_requires_whole_number_confirmation(
         self,
@@ -2118,7 +2164,7 @@ class DatabaseTests(unittest.TestCase):
                 session,
                 employee,
                 vehicle,
-                7.5,
+                75,
                 261563,
                 verify=False,
             )
@@ -2133,7 +2179,7 @@ class DatabaseTests(unittest.TestCase):
                 session,
                 employee,
                 photo.id,
-                Decimal("7.5"),
+                Decimal("75"),
                 Decimal("261563"),
             )
 

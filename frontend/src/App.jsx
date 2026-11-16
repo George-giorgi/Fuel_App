@@ -393,11 +393,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
 
   useEffect(() => {
     if (!photo || photo.verifiedAt) return;
-    setCurrentFillDraft(
-      photo.ocrCurrentFillLitres == null
-        ? ''
-        : String(photo.ocrCurrentFillLitres)
-    );
+    setCurrentFillDraft(currentFillDraftValue(photo));
     setCumulativeTotalDraft(cumulativeTotalDraftValue(photo));
   }, [photo]);
 
@@ -685,15 +681,13 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                 <span>Current Fill</span>
               </span>
               <strong>
-                {formatLitres(photo.ocrCurrentFillLitres)} litres
+                {formatOcrCurrentFill(photo)}
                 {photo.ocrCurrentFillConfidence != null &&
                   ` (${Math.round(photo.ocrCurrentFillConfidence)}% confidence)`}
               </strong>
               <small>
-                Segment digits: {photo.ocrCurrentFillRawDigits || 'not detected'}.
-                Decimal: {photo.ocrCurrentFillDecimalPosition == null
-                  ? 'uncertain'
-                  : `after ${photo.ocrCurrentFillDecimalPosition} digits`}.
+                Digits only; decimal point ignored. Recognized digits:{' '}
+                {photo.ocrCurrentFillRawDigits || 'not detected'}.
                 {photo.ocrCurrentFillSegmentConfidence != null &&
                   ` Segment confidence ${Math.round(photo.ocrCurrentFillSegmentConfidence)}%.`}
               </small>
@@ -730,7 +724,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                   <AppIcon name="fuel" size={14} />
                   <span>Verified Current Fill</span>
                 </span>
-                <strong>{formatLitres(photo.currentFillLitres)} litres</strong>
+                <strong>{formatCurrentFill(photo.currentFillLitres)} litres</strong>
               </div>
               <div>
                 <span className="meter-reading-label">
@@ -750,20 +744,21 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           ) : (
             <form className="meter-review-form" onSubmit={handleVerify}>
               <p>
-                Check both values against the original photo. Current Fill may
-                include decimals; enter Cumulative Total as digits only, without
-                a decimal point. Review and correct any uncertain reading.
+                Check both whole-litre values against the original photo. Digits
+                only; decimal points are ignored. Review and correct any
+                uncertain reading.
               </p>
               <label>
                 Current Fill (L)
                 <input
                   type="text"
-                  inputMode="decimal"
+                  inputMode="numeric"
                   autoComplete="off"
+                  pattern="[0-9]+"
                   required
                   value={currentFillDraft}
                   onChange={(event) => setCurrentFillDraft(event.target.value)}
-                  placeholder="e.g. 22.032"
+                  placeholder="e.g. 22032"
                 />
               </label>
               <label>
@@ -1156,7 +1151,7 @@ function FuelForm({
                 <AppIcon name="fuel" size={14} />
                 <span>Current Fill</span>
               </span>
-              <strong>{formatLitres(meterPhoto.currentFillLitres)} litres</strong>
+              <strong>{formatCurrentFill(meterPhoto.currentFillLitres)} litres</strong>
             </div>
             <div>
               <span className="meter-reading-label">
@@ -1354,9 +1349,26 @@ function formatLitres(value) {
   });
 }
 
+function formatCurrentFill(value) {
+  if (value == null) return 'Not recorded';
+  const litres = Number(value);
+  return Number.isInteger(litres) ? String(litres) : formatLitres(litres);
+}
+
 function formatCumulativeTotal(value) {
   if (value == null) return 'Not recorded';
   return String(value);
+}
+
+function formatOcrCurrentFill(photo) {
+  if (photo.ocrCurrentFillRawDigits) {
+    return `${photo.ocrCurrentFillRawDigits} litres`;
+  }
+  if (photo.ocrCurrentFillLitres == null) return 'Not recorded';
+  if (!Number.isInteger(photo.ocrCurrentFillLitres)) {
+    return 'Needs manual review';
+  }
+  return `${formatCurrentFill(photo.ocrCurrentFillLitres)} litres`;
 }
 
 function formatOcrCumulativeTotal(photo) {
@@ -1368,6 +1380,15 @@ function formatOcrCumulativeTotal(photo) {
     return 'Needs manual review';
   }
   return `${formatCumulativeTotal(photo.ocrCumulativeTotalLitres)} litres`;
+}
+
+function currentFillDraftValue(photo) {
+  if (photo.ocrCurrentFillRawDigits) {
+    return photo.ocrCurrentFillRawDigits;
+  }
+  return Number.isInteger(photo.ocrCurrentFillLitres)
+    ? String(photo.ocrCurrentFillLitres)
+    : '';
 }
 
 function cumulativeTotalDraftValue(photo) {
@@ -1413,7 +1434,7 @@ function emailReport(record) {
     `Fuel type: ${record.fuelType}`,
     `Mileage: ${formatMileage(record.mileageMiles)} mi`,
     `Tank capacity: ${record.capacity} litres`,
-    `Current Fill: ${formatLitres(record.currentFillLitres ?? record.litres)} litres`,
+    `Current Fill: ${formatCurrentFill(record.currentFillLitres ?? record.litres)} litres`,
     `Cumulative Total: ${formatCumulativeTotal(record.cumulativeTotalLitres)} litres`,
     `Cumulative difference: ${formatLitres(record.meterDeltaLitres)} litres`,
     `Meter check: ${record.meterCheckStatus}`,
@@ -1473,7 +1494,7 @@ function HistorySection({
                   Mileage: {formatMileage(record.mileageMiles)} mi
                 </small>
                 <small>
-                  Current Fill: {formatLitres(record.currentFillLitres ?? record.litres)} litres
+                  Current Fill: {formatCurrentFill(record.currentFillLitres ?? record.litres)} litres
                 </small>
                 <small>
                   Cumulative Total: {formatCumulativeTotal(record.cumulativeTotalLitres)} litres
@@ -1490,7 +1511,7 @@ function HistorySection({
                 )}
               </div>
               <div className="litres">
-                {formatLitres(record.currentFillLitres ?? record.litres)} L
+                {formatCurrentFill(record.currentFillLitres ?? record.litres)} L
               </div>
               <small className="record-cost">
                 {record.cost != null ? `Cost: ${formatCost(record.cost)}` : 'Cost not supplied'}
@@ -1500,7 +1521,7 @@ function HistorySection({
                 <dl>
                   <div>
                     <dt>Current Fill</dt>
-                    <dd>{formatLitres(record.currentFillLitres ?? record.litres)} litres</dd>
+                    <dd>{formatCurrentFill(record.currentFillLitres ?? record.litres)} litres</dd>
                   </div>
                   <div>
                     <dt>Cumulative Total</dt>
@@ -1719,7 +1740,7 @@ function GlobalMeterDashboard({
                     {entry.currentFillLitres != null && (
                       <div>
                         <dt>Current fill</dt>
-                        <dd>{formatLitres(entry.currentFillLitres)} L</dd>
+                        <dd>{formatCurrentFill(entry.currentFillLitres)} L</dd>
                       </div>
                     )}
                     <div>
@@ -1936,7 +1957,7 @@ function DashboardSection({
             <span className="overview-metric-label">LATEST FILL</span>
           </div>
           <strong className="overview-metric-value">
-            {latestCurrentFill == null ? '--' : formatLitres(latestCurrentFill)}
+            {latestCurrentFill == null ? '--' : formatCurrentFill(latestCurrentFill)}
             {latestCurrentFill != null && (
               <span className="overview-metric-unit">L</span>
             )}
@@ -2035,7 +2056,7 @@ function DashboardSection({
                     </span>
                     <div className="overview-fill-main">
                       <strong>
-                        {formatLitres(record.currentFillLitres ?? record.litres)} L
+                        {formatCurrentFill(record.currentFillLitres ?? record.litres)} L
                       </strong>
                       <time
                         className="overview-fill-date"

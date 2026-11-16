@@ -311,6 +311,13 @@ def verify_meter_photo(
             "Enter both meter readings or neither."
         )
     if (
+        current_fill_litres is not None
+        and current_fill_litres.as_tuple().exponent < 0
+    ):
+        raise InvalidMeterVerification(
+            "Current Fill must be entered as whole litres."
+        )
+    if (
         cumulative_total_litres is not None
         and cumulative_total_litres.as_tuple().exponent < 0
     ):
@@ -349,6 +356,7 @@ def verify_meter_photo(
             or meter_photo.ocr_cumulative_total_litres < 0
             or not math.isfinite(meter_photo.ocr_current_fill_litres)
             or not math.isfinite(meter_photo.ocr_cumulative_total_litres)
+            or not float(meter_photo.ocr_current_fill_litres).is_integer()
             or not float(meter_photo.ocr_cumulative_total_litres).is_integer()
         ):
             raise InvalidMeterVerification(
