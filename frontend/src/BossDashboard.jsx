@@ -703,6 +703,16 @@ export default function BossDashboard({
               })}
             </span>
           </div>
+          <button
+            className="boss-icon-button boss-theme-button"
+            type="button"
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            aria-pressed={theme === 'dark'}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            onClick={onToggleTheme}
+          >
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+          </button>
           <div className="boss-popover-anchor">
             <button
               className="boss-icon-button"
@@ -795,17 +805,6 @@ export default function BossDashboard({
                   <strong>{employee.name}</strong>
                   <small>{employee.email}</small>
                 </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    onToggleTheme();
-                    setProfileOpen(false);
-                  }}
-                >
-                  <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={16} />
-                  Switch to {theme === 'dark' ? 'light' : 'dark'} theme
-                </button>
                 <button
                   type="button"
                   role="menuitem"

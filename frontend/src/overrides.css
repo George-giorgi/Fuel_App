@@ -1074,6 +1074,19 @@ select:focus-visible {
   min-width: 0;
 }
 
+.employee-topbar-actions {
+  width: min(100%, 320px);
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.topbar-utility-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .content.content-admin-employees {
   padding-top: 8px;
 }
@@ -1084,6 +1097,7 @@ select:focus-visible {
 
 .topbar-primary-action {
   display: inline-flex;
+  width: 100%;
   min-height: 42px;
   align-items: center;
   justify-content: center;

@@ -4167,7 +4167,15 @@ function Workspace({
             <p className="eyebrow">MONITOR / FUEL LOG</p>
             <h2>Welcome back, {employee.name}.</h2>
           </div>
-          <div className="topbar-actions">
+          <div
+            className={`topbar-actions${!isAdmin ? ' employee-topbar-actions' : ''}`}
+          >
+            <div className="topbar-utility-actions">
+              <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+              <button className="text-button" type="button" onClick={onLogout}>
+                Sign out <span>-&gt;</span>
+              </button>
+            </div>
             {!isAdmin && (
               <a
                 className="topbar-primary-action"
@@ -4179,10 +4187,6 @@ function Workspace({
                 <span aria-hidden="true">&darr;</span>
               </a>
             )}
-            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-            <button className="text-button" type="button" onClick={onLogout}>
-              Sign out <span>-&gt;</span>
-            </button>
           </div>
         </header>
 

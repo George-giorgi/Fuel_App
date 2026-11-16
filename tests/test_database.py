@@ -1232,6 +1232,38 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result.current_fill_litres, 5.0)
         self.assertEqual(result.cumulative_total_litres, 9667.5)
 
+    def test_tesseract_retries_center_crop_with_digit_whitelist(self) -> None:
+        import pytesseract
+
+        image_buffer = BytesIO()
+        Image.new("RGB", (1000, 1000), color="white").save(
+            image_buffer, format="PNG"
+        )
+        readings = {
+            "text": ["12.5", "261563.0"],
+            "conf": ["96", "94"],
+            "top": ["100", "300"],
+            "block_num": ["1", "1"],
+            "par_num": ["1", "1"],
+            "line_num": ["1", "2"],
+        }
+        with (
+            patch.dict(os.environ, {"TESSERACT_CMD": ""}),
+            patch(
+                "pytesseract.image_to_data",
+                side_effect=[{}, {}, {}, {}, readings],
+            ) as image_to_data,
+        ):
+            result = extract_meter_readings(image_buffer.getvalue())
+
+        calls = image_to_data.call_args_list
+        self.assertEqual(calls[0].args[0].size, (1600, 1600))
+        self.assertEqual(calls[4].args[0].size, (1600, 819))
+        self.assertIn("tessedit_char_whitelist", calls[1].kwargs["config"])
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.current_fill_litres, 12.5)
+        self.assertEqual(result.cumulative_total_litres, 261563.0)
+
     def test_tesseract_failure_is_reported_without_auto_acceptance(self) -> None:
         import pytesseract
 
@@ -1262,32 +1294,41 @@ class DatabaseTests(unittest.TestCase):
                 "confidence": confidence,
             }
 
-        google_response = {
-            "responses": [
-                {
-                    "fullTextAnnotation": {
-                        "pages": [
+        def vision_document(words: list[dict]) -> dict:
+            return {
+                "pages": [
+                    {
+                        "blocks": [
                             {
-                                "blocks": [
-                                    {
-                                        "paragraphs": [
-                                            {
-                                                "words": [
-                                                    vision_word("22", 10, 100, 0.94),
-                                                    vision_word(".", 30, 100, 0.90),
-                                                    vision_word("032", 40, 100, 0.92),
-                                                    vision_word("26", 10, 150, 0.96),
-                                                    vision_word("156", 40, 150, 0.96),
-                                                    vision_word("3", 80, 150, 0.96),
-                                                ]
-                                            }
-                                        ]
-                                    }
+                                "paragraphs": [
+                                    {"words": words}
                                 ]
                             }
                         ]
                     }
-                }
+                ]
+            }
+
+        google_response = {
+            "responses": [
+                {
+                    "fullTextAnnotation": vision_document(
+                        [
+                            vision_word("22", 10, 100, 0.94),
+                            vision_word(".", 30, 100, 0.90),
+                            vision_word("032", 40, 100, 0.92),
+                            vision_word("26.56", 10, 150, 0.96),
+                        ]
+                    )
+                },
+                {
+                    "fullTextAnnotation": vision_document(
+                        [
+                            vision_word("26", 10, 50, 0.96),
+                            vision_word("1563", 40, 50, 0.96),
+                        ]
+                    )
+                },
             ]
         }
         response = MagicMock()
@@ -1315,6 +1356,7 @@ class DatabaseTests(unittest.TestCase):
         request_payload = json.loads(request.data)
         self.assertEqual(request.method, "POST")
         self.assertEqual(parse_qs(urlparse(request.full_url).query), {"key": ["test-key"]})
+        self.assertEqual(len(request_payload["requests"]), 2)
         self.assertEqual(
             request_payload["requests"][0]["features"],
             [{"type": "DOCUMENT_TEXT_DETECTION"}],
@@ -1328,6 +1370,15 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertEqual(prepared_image.width, 1200)
         self.assertLess(prepared_image.height, 1024)
+        total_row_image = Image.open(
+            BytesIO(
+                base64.b64decode(
+                    request_payload["requests"][1]["image"]["content"]
+                )
+            )
+        )
+        self.assertEqual(total_row_image.width, 1600)
+        self.assertLess(total_row_image.height, prepared_image.height)
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.current_fill_litres, 22.032)
         self.assertEqual(result.cumulative_total_litres, 26.1563)
@@ -1350,7 +1401,12 @@ class DatabaseTests(unittest.TestCase):
 
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
-            {"responses": [{"error": {"message": "API key invalid"}}]}
+            {
+                "responses": [
+                    {"error": {"message": "API key invalid"}},
+                    {},
+                ]
+            }
         ).encode()
         with (
             patch.dict(
@@ -1380,6 +1436,59 @@ class DatabaseTests(unittest.TestCase):
 
         self.assertEqual(result.status, "unavailable")
         self.assertIn("Google Vision is selected", result.message)
+
+    def test_local_defaults_to_google_vision_when_key_is_configured(self) -> None:
+        expected = MeterOcrResult(
+            status="ready",
+            current_fill_litres=12.5,
+            cumulative_total_litres=261563.0,
+            current_fill_confidence=99,
+            cumulative_total_confidence=99,
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "FUEL_ENV": "development",
+                    "GOOGLE_CLOUD_VISION_API_KEY": "test-key",
+                },
+                clear=True,
+            ),
+            patch(
+                "backend.app.services.meter_ocr._extract_google_vision_readings",
+                return_value=expected,
+            ) as vision_mock,
+            patch(
+                "backend.app.services.meter_ocr._extract_tesseract_readings"
+            ) as tesseract_mock,
+        ):
+            result = extract_meter_readings(b"meter image")
+
+        self.assertEqual(result, expected)
+        vision_mock.assert_called_once_with(b"meter image", "test-key")
+        tesseract_mock.assert_not_called()
+
+    def test_local_defaults_to_tesseract_without_google_vision_key(self) -> None:
+        expected = MeterOcrResult(status="uncertain")
+        with (
+            patch.dict(
+                os.environ,
+                {"FUEL_ENV": "development"},
+                clear=True,
+            ),
+            patch(
+                "backend.app.services.meter_ocr._extract_google_vision_readings"
+            ) as vision_mock,
+            patch(
+                "backend.app.services.meter_ocr._extract_tesseract_readings",
+                return_value=expected,
+            ) as tesseract_mock,
+        ):
+            result = extract_meter_readings(b"meter image")
+
+        self.assertEqual(result, expected)
+        tesseract_mock.assert_called_once_with(b"meter image")
+        vision_mock.assert_not_called()
 
     def test_fuel_submission_uses_fill_and_compares_cumulative_reading(self) -> None:
         with Session(self.engine) as session, session.begin():

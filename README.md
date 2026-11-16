@@ -274,8 +274,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   readings. Missing, low-confidence, or unavailable OCR blocks verification and
   transaction submission.
 - Production uses Google Cloud Vision `DOCUMENT_TEXT_DETECTION`. Before sending a
-  PIUSI photo to Vision, the backend crops the centered display area and upscales
-  it for OCR; reading lengths remain unrestricted. The Render blueprint sets
+  PIUSI photo to Vision, the backend crops and upscales the display, then sends a
+  contrast-enhanced close crop of the smaller TOTAL row as a second OCR pass.
+  Reading lengths remain unrestricted. The Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to
   Tesseract; to use Google Vision locally, set:
@@ -290,6 +291,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Google for OCR. Google lists the first 1,000 Vision text/document-text
   detection units per month as free; review the [current pricing](https://cloud.google.com/vision/pricing),
   enable quota/billing alerts, and get approval before sending company photos.
+  Local development automatically uses Google Vision when
+  `GOOGLE_CLOUD_VISION_API_KEY` is configured, unless `FUEL_OCR_PROVIDER` is
+  explicitly set to another provider.
   When `FUEL_ENV=production` and no provider is explicitly set, the backend
   defaults to Google Vision. If the key is missing, OCR reports that Vision is
   unavailable instead of silently falling back to local Tesseract.
@@ -298,6 +302,8 @@ imported. The Render start command applies schema-only Alembic upgrades.
   the backend detects the standard install location automatically. On macOS, use
   `brew install tesseract` or `sudo port install tesseract tesseract-eng`.
   Install Python dependencies with `python -m pip install -r requirements.txt`.
+  Local OCR tries a centered, enlarged display crop with grayscale and thresholded
+  variants, then retries the full photo if needed.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
   are also detected automatically.

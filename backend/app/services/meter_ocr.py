@@ -9,7 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageFilter, ImageOps
 
 from backend.app.core.config import METER_OCR_MIN_CONFIDENCE
 
@@ -24,7 +24,9 @@ _TESSERACT_PATHS = (
 _GOOGLE_VISION_ENDPOINT = "https://vision.googleapis.com/v1/images:annotate"
 _GOOGLE_VISION_TIMEOUT_SECONDS = 20
 _GOOGLE_VISION_CROP = (0.08, 0.35, 0.92, 0.78)
+_GOOGLE_VISION_TOTAL_ROW_CROP = (0.18, 0.54, 0.80, 0.70)
 _GOOGLE_VISION_MIN_WIDTH = 1200
+_GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH = 1600
 
 
 @dataclass(frozen=True)
@@ -208,8 +210,38 @@ def _prepare_google_vision_image(content: bytes) -> bytes:
     return prepared.getvalue()
 
 
+def _prepare_google_vision_total_row_image(content: bytes) -> bytes:
+    with Image.open(BytesIO(content)) as source:
+        image = ImageOps.exif_transpose(source).convert("L")
+
+    width, height = image.size
+    left, top, right, bottom = (
+        round(width * _GOOGLE_VISION_TOTAL_ROW_CROP[0]),
+        round(height * _GOOGLE_VISION_TOTAL_ROW_CROP[1]),
+        round(width * _GOOGLE_VISION_TOTAL_ROW_CROP[2]),
+        round(height * _GOOGLE_VISION_TOTAL_ROW_CROP[3]),
+    )
+    if right <= left or bottom <= top:
+        raise ValueError("The photo is too small to crop the cumulative meter row.")
+
+    image = ImageOps.autocontrast(image.crop((left, top, right, bottom)), cutoff=1)
+    image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+    if image.width < _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH:
+        scale = _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH / image.width
+        image = image.resize(
+            (_GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH, round(image.height * scale)),
+            Image.Resampling.LANCZOS,
+        )
+
+    prepared = BytesIO()
+    image.save(prepared, format="JPEG", quality=95)
+    return prepared.getvalue()
+
+
 def _google_vision_word_lines(
     document: dict[str, object],
+    *,
+    cumulative_row_only: bool = False,
 ) -> list[tuple[int, str, float]]:
     words = []
     pages = document.get("pages", [])
@@ -313,7 +345,7 @@ def _google_vision_word_lines(
             continue
         number = _number_from_google_vision_words(
             numeric_words,
-            is_cumulative_total=len(readings) == 1,
+            is_cumulative_total=cumulative_row_only or len(readings) == 1,
         )
         if number is None:
             continue
@@ -382,7 +414,8 @@ def _extract_google_vision_readings(
     api_key: str,
 ) -> MeterOcrResult:
     try:
-        image_content = _prepare_google_vision_image(content)
+        display_content = _prepare_google_vision_image(content)
+        total_row_content = _prepare_google_vision_total_row_image(content)
     except (OSError, ValueError, Image.DecompressionBombError):
         return MeterOcrResult(
             status="failed",
@@ -394,7 +427,15 @@ def _extract_google_vision_readings(
         {
             "requests": [
                 {
-                    "image": {"content": base64.b64encode(image_content).decode("ascii")},
+                    "image": {
+                        "content": base64.b64encode(display_content).decode("ascii")
+                    },
+                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
+                },
+                {
+                    "image": {
+                        "content": base64.b64encode(total_row_content).decode("ascii")
+                    },
                     "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
                 }
             ]
@@ -432,7 +473,114 @@ def _extract_google_vision_readings(
             status="failed",
             message="Google Vision returned an invalid response.",
         )
-    return _parse_google_vision_response(response_data)
+
+    if not isinstance(response_data, dict):
+        return MeterOcrResult(
+            status="failed",
+            message="Google Vision returned an invalid response.",
+        )
+    responses = response_data.get("responses")
+    if (
+        not isinstance(responses, list)
+        or len(responses) < 2
+        or not isinstance(responses[0], dict)
+        or not isinstance(responses[1], dict)
+    ):
+        return MeterOcrResult(
+            status="failed",
+            message="Google Vision did not return results for both meter crops.",
+        )
+
+    display_result = _parse_google_vision_response(
+        {"responses": [responses[0]]}
+    )
+    if display_result.status == "failed":
+        return display_result
+    if (
+        display_result.current_fill_litres is None
+        or display_result.current_fill_confidence is None
+    ):
+        return display_result
+
+    total_response = responses[1]
+    api_error = total_response.get("error")
+    if isinstance(api_error, dict):
+        message = api_error.get("message", "The OCR request was rejected.")
+        return MeterOcrResult(
+            status="failed",
+            message=f"Google Vision error reading the cumulative row: {message}",
+        )
+    total_document = total_response.get("fullTextAnnotation")
+    if not isinstance(total_document, dict):
+        return MeterOcrResult(
+            status="uncertain",
+            current_fill_litres=display_result.current_fill_litres,
+            current_fill_confidence=display_result.current_fill_confidence,
+            message="Google Vision could not read the PIUSI TOTAL row. Retake the photo.",
+        )
+
+    total_readings = _google_vision_word_lines(
+        total_document,
+        cumulative_row_only=True,
+    )
+    if not total_readings:
+        return MeterOcrResult(
+            status="uncertain",
+            current_fill_litres=display_result.current_fill_litres,
+            current_fill_confidence=display_result.current_fill_confidence,
+            message="Google Vision could not read the PIUSI TOTAL row. Retake the photo.",
+        )
+
+    _, total_text, total_confidence = total_readings[0]
+    return parse_meter_ocr_data(
+        {
+            "text": [
+                str(display_result.current_fill_litres),
+                total_text,
+            ],
+            "conf": [
+                display_result.current_fill_confidence,
+                total_confidence,
+            ],
+            "top": [0, 1],
+            "block_num": [1, 1],
+            "par_num": [1, 1],
+            "line_num": [1, 2],
+        }
+    )
+
+
+def _resize_for_tesseract(image: Image.Image) -> Image.Image:
+    width, height = image.size
+    scale = min(1600 / width if width < 1600 else 1, 2400 / max(width, height))
+    if scale != 1:
+        image = image.resize(
+            (round(width * scale), round(height * scale)),
+            Image.Resampling.LANCZOS,
+        )
+    return image
+
+
+def _prepare_tesseract_images(content: bytes) -> list[Image.Image]:
+    with Image.open(BytesIO(content)) as source:
+        image = ImageOps.exif_transpose(source).convert("L")
+
+    image = ImageOps.autocontrast(image)
+    width, height = image.size
+    left, top, right, bottom = (
+        round(width * _GOOGLE_VISION_CROP[0]),
+        round(height * _GOOGLE_VISION_CROP[1]),
+        round(width * _GOOGLE_VISION_CROP[2]),
+        round(height * _GOOGLE_VISION_CROP[3]),
+    )
+    crop = _resize_for_tesseract(image.crop((left, top, right, bottom)))
+    thresholded = crop.point(lambda pixel: 255 if pixel > 150 else 0)
+    return [
+        _resize_for_tesseract(image),
+        crop,
+        thresholded,
+        ImageOps.invert(thresholded),
+    ]
 
 
 def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
@@ -448,24 +596,33 @@ def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
 
     pytesseract.pytesseract.tesseract_cmd = _get_tesseract_command()
     try:
-        with Image.open(BytesIO(content)) as source:
-            image = ImageOps.autocontrast(source.convert("L"))
-            if image.width < 1200:
-                scale = 1200 / image.width
-                image = image.resize(
-                    (1200, round(image.height * scale)),
-                    Image.Resampling.LANCZOS,
-                )
-        results = [
-            parse_meter_ocr_data(
-                pytesseract.image_to_data(
-                    image,
-                    config=f"--psm {page_segmentation}",
-                    output_type=Output.DICT,
-                )
-            )
-            for page_segmentation in (6, 11)
-        ]
+        images = _prepare_tesseract_images(content)
+        results = []
+        for image_index, image in enumerate(images):
+            page_segmentations = (6, 11) if image_index < 2 else (6,)
+            for page_segmentation in page_segmentations:
+                for whitelist in (False, True):
+                    config = f"--psm {page_segmentation}"
+                    if whitelist:
+                        config += " -c tessedit_char_whitelist=0123456789.,"
+                    result = parse_meter_ocr_data(
+                        pytesseract.image_to_data(
+                            image,
+                            config=config,
+                            output_type=Output.DICT,
+                        )
+                    )
+                    results.append(result)
+                    if (
+                        result.status == "ready"
+                        and result.current_fill_confidence is not None
+                        and result.cumulative_total_confidence is not None
+                        and min(
+                            result.current_fill_confidence,
+                            result.cumulative_total_confidence,
+                        ) >= METER_OCR_MIN_CONFIDENCE + 15
+                    ):
+                        return result
     except TesseractNotFoundError:
         return MeterOcrResult(
             status="unavailable",
@@ -493,15 +650,18 @@ def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
 
 
 def extract_meter_readings(content: bytes) -> MeterOcrResult:
+    vision_api_key = os.environ.get("GOOGLE_CLOUD_VISION_API_KEY", "").strip()
     default_provider = (
         "google_vision"
-        if os.environ.get("FUEL_ENV", "").strip().lower() == "production"
+        if (
+            os.environ.get("FUEL_ENV", "").strip().lower() == "production"
+            or vision_api_key
+        )
         else "tesseract"
     )
     provider = os.environ.get("FUEL_OCR_PROVIDER", default_provider).strip().lower()
     if provider == "google_vision":
-        api_key = os.environ.get("GOOGLE_CLOUD_VISION_API_KEY", "").strip()
-        if not api_key:
+        if not vision_api_key:
             return MeterOcrResult(
                 status="unavailable",
                 message=(
@@ -509,7 +669,7 @@ def extract_meter_readings(content: bytes) -> MeterOcrResult:
                     "GOOGLE_CLOUD_VISION_API_KEY is not configured."
                 ),
             )
-        return _extract_google_vision_readings(content, api_key)
+        return _extract_google_vision_readings(content, vision_api_key)
     if provider != "tesseract":
         return MeterOcrResult(
             status="failed",
