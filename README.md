@@ -293,8 +293,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   When `FUEL_ENV=production` and no provider is explicitly set, the backend
   defaults to Google Vision. If the key is missing, OCR reports that Vision is
   unavailable instead of silently falling back to local Tesseract.
-- Install Tesseract only when using the local provider (for macOS, use
-  `brew install tesseract` or `sudo port install tesseract tesseract-eng`).
+- Install Tesseract only when using the local provider. On Windows, install
+  `UB-Mannheim.TesseractOCR` with `winget install --id UB-Mannheim.TesseractOCR`;
+  the backend detects the standard install location automatically. On macOS, use
+  `brew install tesseract` or `sudo port install tesseract tesseract-eng`.
   Install Python dependencies with `python -m pip install -r requirements.txt`.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths

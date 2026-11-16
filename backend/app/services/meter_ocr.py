@@ -15,6 +15,8 @@ from backend.app.core.config import METER_OCR_MIN_CONFIDENCE
 
 
 _TESSERACT_PATHS = (
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
     "/opt/local/bin/tesseract",
     "/usr/local/bin/tesseract",
     "/opt/homebrew/bin/tesseract",
@@ -56,6 +58,35 @@ def _number_from_token(value: str) -> float | None:
         return float(number)
     except ValueError:
         return None
+
+
+def _number_from_google_vision_words(
+    numeric_words: list[tuple[str, float]],
+    *,
+    is_cumulative_total: bool,
+) -> float | None:
+    text = "".join(word for word, _ in numeric_words)
+    number = _number_from_token(text)
+    if (
+        number is None
+        or not is_cumulative_total
+        or any("." in word or "," in word for word, _ in numeric_words)
+    ):
+        return number
+
+    digit_groups = [
+        group
+        for word, _ in numeric_words
+        for group in re.findall(r"[0-9OQIL]+", word.upper())
+    ]
+    if len(digit_groups) < 2:
+        return number
+
+    # Vision can replace the PIUSI total's decimal mark with a space.
+    inferred_number = _number_from_token(
+        f"{digit_groups[0]}.{''.join(digit_groups[1:])}"
+    )
+    return inferred_number if inferred_number is not None else number
 
 
 def parse_meter_ocr_data(
@@ -269,7 +300,7 @@ def _google_vision_word_lines(
         ) / len(line_words)
 
     readings = []
-    for line in lines:
+    for line in sorted(lines, key=lambda item: float(item["center"])):
         numeric_words = [
             (text, confidence)
             for _, _, text, confidence in sorted(
@@ -280,7 +311,10 @@ def _google_vision_word_lines(
         ]
         if not numeric_words:
             continue
-        number = _number_from_token("".join(text for text, _ in numeric_words))
+        number = _number_from_google_vision_words(
+            numeric_words,
+            is_cumulative_total=len(readings) == 1,
+        )
         if number is None:
             continue
         confidence = sum(

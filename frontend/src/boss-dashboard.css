@@ -2270,30 +2270,67 @@
 
 @media (max-width: 640px) {
   .boss-header {
-    min-height: 62px;
+    display: grid;
+    grid-template-areas:
+      "brand actions"
+      "tabs tabs"
+      "nav nav";
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    justify-content: stretch;
+    gap: 8px 12px;
+    min-height: 0;
+    padding-top: 10px;
+    padding-bottom: 10px;
     padding-right: 12px;
     padding-left: 12px;
   }
 
   .boss-brand {
+    grid-area: brand;
     min-width: 0;
+    flex: initial;
     gap: 7px;
   }
 
   .boss-brand img {
+    flex: 0 0 56px;
     width: 56px;
     height: 37px;
   }
 
   .boss-brand-copy span {
     font-size: 8px;
+    white-space: nowrap;
   }
 
   .boss-brand-copy strong {
     font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .boss-dashboard-tabs {
+    grid-area: tabs;
+    width: 100%;
+    margin: 0;
+  }
+
+  .boss-dashboard-tabs button {
+    flex: 1 1 0;
+  }
+
+  .boss-header-nav {
+    grid-area: nav;
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 3px;
+    padding-bottom: 4px;
   }
 
   .boss-header-actions {
+    grid-area: actions;
     gap: 6px;
   }
 

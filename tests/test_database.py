@@ -1198,6 +1198,40 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result.current_fill_litres, 5.0)
         self.assertEqual(result.cumulative_total_litres, 9667.5)
 
+    def test_tesseract_detects_standard_windows_install_path(self) -> None:
+        import pytesseract
+
+        image_buffer = BytesIO()
+        Image.new("RGB", (32, 32), color="white").save(image_buffer, format="PNG")
+        ocr_data = {
+            "text": ["5.00", "9667.50"],
+            "conf": ["96", "94"],
+            "top": ["10", "20"],
+            "block_num": ["1", "1"],
+            "par_num": ["1", "1"],
+            "line_num": ["1", "2"],
+        }
+        windows_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        with (
+            patch.dict(os.environ, {"TESSERACT_CMD": ""}),
+            patch.object(pytesseract.pytesseract, "tesseract_cmd", "tesseract"),
+            patch(
+                "backend.app.services.meter_ocr.shutil.which",
+                return_value=None,
+            ),
+            patch(
+                "backend.app.services.meter_ocr.os.access",
+                side_effect=lambda path, mode: path == windows_path,
+            ),
+            patch("pytesseract.image_to_data", return_value=ocr_data),
+        ):
+            result = extract_meter_readings(image_buffer.getvalue())
+            self.assertEqual(pytesseract.pytesseract.tesseract_cmd, windows_path)
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.current_fill_litres, 5.0)
+        self.assertEqual(result.cumulative_total_litres, 9667.5)
+
     def test_tesseract_failure_is_reported_without_auto_acceptance(self) -> None:
         import pytesseract
 
@@ -1242,7 +1276,9 @@ class DatabaseTests(unittest.TestCase):
                                                     vision_word("22", 10, 100, 0.94),
                                                     vision_word(".", 30, 100, 0.90),
                                                     vision_word("032", 40, 100, 0.92),
-                                                    vision_word("261563", 10, 150, 0.96),
+                                                    vision_word("26", 10, 150, 0.96),
+                                                    vision_word("156", 40, 150, 0.96),
+                                                    vision_word("3", 80, 150, 0.96),
                                                 ]
                                             }
                                         ]
@@ -1294,7 +1330,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertLess(prepared_image.height, 1024)
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.current_fill_litres, 22.032)
-        self.assertEqual(result.cumulative_total_litres, 261563.0)
+        self.assertEqual(result.cumulative_total_litres, 26.1563)
         self.assertEqual(result.current_fill_confidence, 93.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
