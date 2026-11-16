@@ -54,6 +54,122 @@ Open the URL printed by Vite (normally [http://localhost:5173](http://localhost:
 Vite proxies API and logo requests to FastAPI on port 8000. FastAPI's API
 documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
+## Cloud deployment preparation
+
+Deployment configuration is prepared on the `deployment/cloud-hosting` branch.
+No cloud resources are created by this repository and no company data is
+imported. The Render start command applies schema-only Alembic upgrades.
+
+### Configuration
+
+- **Cloudflare Pages:** set the project root to `frontend`, build with
+  `npm ci && npm run build`, and use `dist` as the build output directory.
+  Choose a Pages project name to reserve its stable
+  `https://<project-name>.pages.dev` production URL. Vite's output is a static
+  React build; Pages handles SPA route fallback.
+- **Same-origin API proxy:** `frontend/functions/api/[[path]].js` forwards
+  `/api/*` requests to the `API_ORIGIN` Pages Function environment variable.
+  Set `API_ORIGIN` to the Render service's HTTPS origin in the production
+  environment. Leave previews disconnected from production data, or use a
+  separate backend and allowlist for preview testing. This keeps
+  the HttpOnly session cookie on the Pages domain instead of relying on
+  cross-site cookies. Keep `VITE_API_BASE_URL` empty for this setup.
+- **Render:** create the backend Web Service from this branch using
+  [`render.yaml`](./render.yaml). The service installs Tesseract and starts
+  with `python -m alembic upgrade head` before Uvicorn. Configure every
+  `sync: false` variable in Render's environment settings.
+- **CORS:** set `FUEL_CORS_ORIGINS` on Render to the exact production Pages
+  origin (for example `https://diesel-desk.pages.dev`), without a trailing
+  slash. Do not use a wildcard or a preview URL for production.
+- **Database:** create a Neon PostgreSQL database and set Render's
+  `DATABASE_URL` to Neon's pooled PostgreSQL connection string with SSL
+  enabled. SQLAlchemy converts PostgreSQL URLs to the installed psycopg driver.
+  Local development continues to default to SQLite.
+- **Photo storage:** create a private Cloudflare R2 Standard bucket, keep
+  public access disabled, and create an R2 token scoped to that bucket. Set
+  Render's `FUEL_PHOTO_STORAGE=r2`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`,
+  `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`. The backend stores only a
+  generated object key and photo metadata in PostgreSQL; private photo reads
+  pass through authenticated API endpoints. Do not configure an object
+  lifecycle rule that deletes fuel photos.
+- **Secrets:** put database credentials, R2 credentials, `FUEL_AUTH_SECRET`,
+  and any optional Google Vision key only in Render's backend environment.
+  Never prefix a secret with `VITE_`. Pages needs only `API_ORIGIN`.
+- **Administrator:** after Render has applied migrations, bootstrap the first
+  admin once from a trusted local shell using the production Neon URL and the
+  existing `python -m backend.app.cli bootstrap-admin` command. It prompts for
+  the password without echoing it. Do not run demo seed/reset commands against
+  PostgreSQL; those commands are restricted to local SQLite.
+
+### Manual deployment sequence
+
+1. Review and commit the deployment changes on `deployment/cloud-hosting`.
+   Push only after approving the push:
+
+   ```bash
+   git push -u origin deployment/cloud-hosting
+   ```
+
+2. In Cloudflare Pages, create a Git-connected project from
+   `deployment/cloud-hosting`, choose its permanent project name, and enter the
+   build settings above. Set `API_ORIGIN` to the HTTPS Render service origin
+   after that service exists. The Pages URL is the exact origin to enter in
+   Render's `FUEL_CORS_ORIGINS`.
+3. In Neon, create a PostgreSQL project/database, copy its pooled connection
+   string, and keep it available for Render's `DATABASE_URL` and the one-time
+   trusted-shell admin bootstrap. Do not point local SQLite commands at this
+   URL.
+4. In Cloudflare R2, create a private Standard bucket and a scoped S3 API
+   token. Copy the account ID, bucket name, access key, and secret key to the
+   matching Render environment variables. Do not enable public bucket access.
+5. In Render, create the Web Service from the pushed branch using
+   `render.yaml`. Set `DATABASE_URL`, the exact Pages `FUEL_CORS_ORIGINS`, and
+   all R2 variables. Confirm the generated `FUEL_AUTH_SECRET` is present and
+   the deploy health check passes at `/healthz`.
+6. From a trusted local terminal, set the production Neon URL,
+   `FUEL_ADMIN_EMAIL`, and `FUEL_ADMIN_NAME` for one command, then run
+   `python -m backend.app.cli bootstrap-admin`. The command prompts for a new
+   admin password. Clear the temporary production URL from that shell after
+   the command completes.
+7. Set Pages' production `API_ORIGIN` to the Render service's HTTPS origin and
+   redeploy Pages. Verify login, logout, role restrictions, an employee's
+   photo upload/retrieval, and an Admin/Boss photo view with test data before
+   entering company data.
+8. Use a disposable Neon database and private test bucket first. Back up
+   production before future schema changes. The Render start command runs only
+   additive Alembic upgrades; it does not reset or delete database rows.
+
+### Free-tier and readiness limitations
+
+- Render Free Web Services sleep after 15 minutes without traffic; waking can
+  take about a minute. Their filesystem is ephemeral and is lost on restart,
+  sleep, or deploy, so SQLite and local uploads are not production storage.
+  Render documents 750 free instance-hours per workspace/month, usage limits
+  for bandwidth/build minutes, and warns that Free services are not for
+  production. Review current [Render Free limits](https://render.com/docs/free)
+  and billing settings before use.
+- Neon Free currently includes 100 compute-hours per project, scale-to-zero
+  after five minutes, and 1 GB of database storage per project (20 GB total per
+  account). Monitor limits and costs; paid Launch usage is metered. See
+  [Neon pricing](https://neon.com/pricing).
+- Cloudflare R2 Standard currently includes 10 GB-month storage, 1 million
+  Class A requests, and 10 million Class B requests monthly; standard Internet
+  egress is free. Above the included usage, Standard storage is currently
+  $0.015/GB-month, Class A is $4.50/million requests, and Class B is
+  $0.36/million requests. Since Diesel Desk intentionally does not delete old
+  meter photos, storage usage grows over time. See
+  [R2 pricing](https://developers.cloudflare.com/r2/pricing/).
+- Cloudflare Pages Free currently allows 500 builds/month, 20,000 static files,
+  and a 25 MiB maximum per asset. Pages Functions share the Workers Free quota
+  of 100,000 requests/day and 10 ms CPU per invocation. Workers Paid currently
+  starts at $5/month if more capacity is needed. See
+  [Pages limits](https://developers.cloudflare.com/pages/platform/limits/) and
+  [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/).
+- These changes have not been deployed or tested against real Neon or R2
+  resources. Local SQLite, local photo storage, and mocked R2 behavior can be
+  tested from the repository; actual cloud persistence, billing, and the full
+  live deployment flow still require manual setup and verification.
+
 ## Phase 2 status
 
 - The React/Vite interface preserves the existing layout, responsive styling,

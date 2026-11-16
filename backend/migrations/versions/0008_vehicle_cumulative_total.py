@@ -31,7 +31,7 @@ def upgrade() -> None:
                     FROM fuel_records
                     WHERE fuel_records.vehicle_id = vehicles.id
                       AND fuel_records.meter_epoch = vehicles.meter_epoch
-                      AND fuel_records.is_demo = 0
+                      AND fuel_records.is_demo IS FALSE
                       AND fuel_records.cumulative_total_litres IS NOT NULL
                     ORDER BY fuel_records.created_at DESC, fuel_records.id DESC
                     LIMIT 1

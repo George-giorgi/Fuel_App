@@ -24,17 +24,10 @@ def _column_names(table_name: str) -> set[str]:
 
 
 def _index_names(table_name: str) -> set[str]:
-    return set(
-        op.get_bind()
-        .execute(
-            sa.text(
-                "SELECT name FROM sqlite_master "
-                "WHERE type = 'index' AND tbl_name = :table_name"
-            ),
-            {"table_name": table_name},
-        )
-        .scalars()
-    )
+    return {
+        index["name"]
+        for index in sa.inspect(op.get_bind()).get_indexes(table_name)
+    }
 
 
 def _has_foreign_key(
@@ -51,17 +44,26 @@ def _has_foreign_key(
 
 def upgrade() -> None:
     connection = op.get_bind()
-    connection.commit()
-    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
     try:
         _upgrade_schema()
-        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
-        if violations:
-            raise RuntimeError(f"Foreign key violations after migration: {violations}")
+        if is_sqlite:
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).all()
+            if violations:
+                raise RuntimeError(
+                    f"Foreign key violations after migration: {violations}"
+                )
     finally:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.commit()
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
 
 
 def _upgrade_schema() -> None:
@@ -73,7 +75,7 @@ def _upgrade_schema() -> None:
             sa.Column(
                 "is_demo",
                 sa.Boolean(),
-                server_default=sa.text("0"),
+                server_default=sa.false(),
                 nullable=False,
             ),
         )
@@ -104,7 +106,7 @@ def _upgrade_schema() -> None:
         sa.Column(
             "is_demo",
             sa.Boolean(),
-            server_default=sa.text("0"),
+            server_default=sa.false(),
             nullable=False,
         ),
     ):
@@ -117,6 +119,7 @@ def _upgrade_schema() -> None:
             ["employee_id"],
             unique=True,
             sqlite_where=sa.text("is_demo = 1"),
+            postgresql_where=sa.true(),
         )
 
     for column in (
@@ -125,7 +128,7 @@ def _upgrade_schema() -> None:
         sa.Column(
             "is_demo",
             sa.Boolean(),
-            server_default=sa.text("0"),
+            server_default=sa.false(),
             nullable=False,
         ),
         sa.Column("demo_key", sa.String(100), nullable=True),
@@ -183,17 +186,26 @@ def _upgrade_schema() -> None:
 
 def downgrade() -> None:
     connection = op.get_bind()
-    connection.commit()
-    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
     try:
         _downgrade_schema()
-        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
-        if violations:
-            raise RuntimeError(f"Foreign key violations after downgrade: {violations}")
+        if is_sqlite:
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).all()
+            if violations:
+                raise RuntimeError(
+                    f"Foreign key violations after downgrade: {violations}"
+                )
     finally:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.commit()
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
 
 
 def _downgrade_schema() -> None:

@@ -23,7 +23,7 @@ def upgrade() -> None:
             "is_company_vehicle",
             sa.Boolean(),
             nullable=False,
-            server_default=sa.text("1"),
+            server_default=sa.true(),
         ),
     )
 

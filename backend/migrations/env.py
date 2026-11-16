@@ -28,31 +28,35 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     with engine.connect() as connection:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
-        connection.commit()
+        is_sqlite = connection.dialect.name == "sqlite"
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
         try:
             context.configure(
                 connection=connection,
                 target_metadata=target_metadata,
                 compare_type=True,
-                render_as_batch=True,
+                render_as_batch=is_sqlite,
             )
             with context.begin_transaction():
                 context.run_migrations()
             connection.commit()
-            violations = connection.exec_driver_sql(
-                "PRAGMA foreign_key_check"
-            ).all()
-            if violations:
-                raise RuntimeError(
-                    f"Database migrations left {len(violations)} foreign-key "
-                    "violation(s)."
-                )
+            if is_sqlite:
+                violations = connection.exec_driver_sql(
+                    "PRAGMA foreign_key_check"
+                ).all()
+                if violations:
+                    raise RuntimeError(
+                        f"Database migrations left {len(violations)} foreign-key "
+                        "violation(s)."
+                    )
         finally:
-            connection.commit()
-            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-            connection.commit()
+            if is_sqlite:
+                connection.commit()
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                connection.commit()
 
 
 if context.is_offline_mode():

@@ -11,7 +11,9 @@ from sqlalchemy import (
     Index,
     String,
     UniqueConstraint,
+    false,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,13 +49,13 @@ class Vehicle(Base):
     )
     qr_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("1")
+        Boolean, nullable=False, default=True, server_default=true()
     )
     is_company_vehicle: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("1")
+        Boolean, nullable=False, default=True, server_default=true()
     )
     is_demo: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("0")
+        Boolean, nullable=False, default=False, server_default=false()
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

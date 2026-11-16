@@ -1,3 +1,9 @@
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '');
+
+export function apiUrl(path) {
+  return `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
 function formatErrorDetail(detail) {
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail)) {
@@ -19,9 +25,9 @@ function formatErrorDetail(detail) {
 async function apiRequest(path, options = {}) {
   const isFormData =
     typeof FormData !== 'undefined' && options.body instanceof FormData;
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     ...options,
-    credentials: 'same-origin',
+    credentials: 'include',
     headers: {
       Accept: 'application/json',
       ...(options.body && !isFormData

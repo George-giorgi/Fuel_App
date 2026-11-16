@@ -14,7 +14,9 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+    false,
     text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -71,6 +73,7 @@ class Employee(Base):
             "role",
             unique=True,
             sqlite_where=text("role = 'admin'"),
+            postgresql_where=text("role = 'admin'"),
         ),
     )
 
@@ -81,10 +84,10 @@ class Employee(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=text("1")
+        Boolean, nullable=False, default=True, server_default=true()
     )
     is_demo: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("0")
+        Boolean, nullable=False, default=False, server_default=false()
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

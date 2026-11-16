@@ -78,34 +78,35 @@ def upgrade() -> None:
         ),
     )
 
-    for column in (
-        sa.Column(
-            "ocr_status",
-            sa.String(length=20),
-            server_default=sa.text("'not_processed'"),
-            nullable=False,
-        ),
-        sa.Column("ocr_current_fill_litres", sa.Float(), nullable=True),
-        sa.Column("ocr_cumulative_total_litres", sa.Float(), nullable=True),
-        sa.Column("ocr_current_fill_confidence", sa.Float(), nullable=True),
-        sa.Column("ocr_cumulative_total_confidence", sa.Float(), nullable=True),
-        sa.Column("current_fill_litres", sa.Float(), nullable=True),
-        sa.Column("cumulative_total_litres", sa.Float(), nullable=True),
-        sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column(
-            "verified_by_employee_id",
-            sa.Integer(),
-            sa.ForeignKey(
-                "employees.id",
-                name="fk_meter_photos_verified_by_employee_id_employees",
-                ondelete="RESTRICT",
+    with op.batch_alter_table("meter_photos") as batch_op:
+        for column in (
+            sa.Column(
+                "ocr_status",
+                sa.String(length=20),
+                server_default=sa.text("'not_processed'"),
+                nullable=False,
             ),
-            nullable=True,
-        ),
-        sa.Column("verification_method", sa.String(length=24), nullable=True),
-        sa.Column("ocr_message", sa.String(length=255), nullable=True),
-    ):
-        op.add_column("meter_photos", column)
+            sa.Column("ocr_current_fill_litres", sa.Float(), nullable=True),
+            sa.Column("ocr_cumulative_total_litres", sa.Float(), nullable=True),
+            sa.Column("ocr_current_fill_confidence", sa.Float(), nullable=True),
+            sa.Column("ocr_cumulative_total_confidence", sa.Float(), nullable=True),
+            sa.Column("current_fill_litres", sa.Float(), nullable=True),
+            sa.Column("cumulative_total_litres", sa.Float(), nullable=True),
+            sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column(
+                "verified_by_employee_id",
+                sa.Integer(),
+                sa.ForeignKey(
+                    "employees.id",
+                    name="fk_meter_photos_verified_by_employee_id_employees",
+                    ondelete="RESTRICT",
+                ),
+                nullable=True,
+            ),
+            sa.Column("verification_method", sa.String(length=24), nullable=True),
+            sa.Column("ocr_message", sa.String(length=255), nullable=True),
+        ):
+            batch_op.add_column(column)
 
     op.create_table(
         "vehicle_meter_events",

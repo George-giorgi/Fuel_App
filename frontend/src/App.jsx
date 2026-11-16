@@ -3,6 +3,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import companyLogo from '../../brusna-curious-cat-logo.png';
 import BossDashboard from './BossDashboard.jsx';
 import {
+  apiUrl,
   createEmployee,
   createVehicle,
   createFuelRecord,
@@ -1234,7 +1235,9 @@ function HistorySection({
               {showMeterPhoto && record.meterPhotoId != null && (
                 <a
                   className="admin-record-photo-link"
-                  href={`/api/management/global-meter/transactions/${record.id}/photo`}
+                  href={apiUrl(
+                    `/api/management/global-meter/transactions/${record.id}/photo`
+                  )}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -1355,8 +1358,12 @@ function GlobalMeterDashboard({
 
         <figure className="global-meter-photo">
           {latestPhotoUrl ? (
-            <a href={latestPhotoUrl} target="_blank" rel="noreferrer">
-              <img src={latestPhotoUrl} alt="Meter photo for the latest accepted reading" />
+            <a href={apiUrl(latestPhotoUrl)} target="_blank" rel="noreferrer">
+              <img
+                src={apiUrl(latestPhotoUrl)}
+                crossOrigin="use-credentials"
+                alt="Meter photo for the latest accepted reading"
+              />
             </a>
           ) : (
             <div className="global-meter-photo-empty">

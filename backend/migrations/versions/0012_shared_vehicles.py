@@ -18,8 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     connection = op.get_bind()
-    connection.commit()
-    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
     try:
         op.create_table(
             "employee_vehicles",
@@ -61,13 +64,20 @@ def upgrade() -> None:
                 type_="foreignkey",
             )
             batch_op.drop_column("employee_id")
-        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
-        if violations:
-            raise RuntimeError(f"Foreign key violations after migration: {violations}")
+        if is_sqlite:
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).all()
+            if violations:
+                raise RuntimeError(
+                    f"Database migrations left {len(violations)} foreign-key "
+                    "violation(s)."
+                )
     finally:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.commit()
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
 
 
 def downgrade() -> None:
@@ -93,7 +103,7 @@ def downgrade() -> None:
             SELECT employee_vehicles.employee_id
             FROM employee_vehicles
             JOIN vehicles ON vehicles.id = employee_vehicles.vehicle_id
-            WHERE vehicles.is_demo = 1
+            WHERE vehicles.is_demo IS TRUE
             GROUP BY employee_vehicles.employee_id
             HAVING COUNT(*) > 1
             LIMIT 1
@@ -105,8 +115,11 @@ def downgrade() -> None:
             "Cannot downgrade while an employee has multiple demo vehicles."
         )
 
-    connection.commit()
-    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
     try:
         with op.batch_alter_table("vehicles") as batch_op:
             batch_op.add_column(sa.Column("employee_id", sa.Integer(), nullable=True))
@@ -141,11 +154,19 @@ def downgrade() -> None:
             ["employee_id"],
             unique=True,
             sqlite_where=sa.text("is_demo = 1"),
+            postgresql_where=sa.true(),
         )
-        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
-        if violations:
-            raise RuntimeError(f"Foreign key violations after migration: {violations}")
+        if is_sqlite:
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).all()
+            if violations:
+                raise RuntimeError(
+                    f"Database migrations left {len(violations)} foreign-key "
+                    "violation(s)."
+                )
     finally:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.commit()
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()

@@ -2,6 +2,8 @@ import math
 import os
 from pathlib import Path
 
+from sqlalchemy.engine import URL, make_url
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIRECTORY = PROJECT_ROOT / "data"
@@ -10,7 +12,48 @@ METER_PHOTO_DIRECTORY = PROJECT_ROOT / "uploads" / "meter-photos"
 SESSION_COOKIE_NAME = "diesel_desk_session"
 ACCESS_TOKEN_MINUTES = 30
 SESSION_COOKIE_SECURE = os.environ.get("FUEL_COOKIE_SECURE", "").lower() == "true"
+SESSION_COOKIE_SAMESITE = os.environ.get("FUEL_COOKIE_SAMESITE", "strict").lower()
 METER_OCR_MIN_CONFIDENCE = 60.0
+
+
+def get_database_url() -> URL:
+    configured_url = os.environ.get("DATABASE_URL", "").strip()
+    if not configured_url:
+        return URL.create("sqlite", database=str(DATABASE_PATH))
+
+    url = make_url(configured_url)
+    if url.drivername in {"postgres", "postgresql"}:
+        url = url.set(drivername="postgresql+psycopg")
+    return url
+
+
+def get_cors_origins() -> list[str]:
+    origins = [
+        origin.strip().rstrip("/")
+        for origin in os.environ.get("FUEL_CORS_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if "*" in origins:
+        raise RuntimeError("FUEL_CORS_ORIGINS must not contain a wildcard.")
+    return origins
+
+
+def validate_cookie_settings() -> None:
+    if SESSION_COOKIE_SAMESITE not in {"strict", "lax", "none"}:
+        raise RuntimeError(
+            "FUEL_COOKIE_SAMESITE must be 'strict', 'lax', or 'none'."
+        )
+    if SESSION_COOKIE_SAMESITE == "none" and not SESSION_COOKIE_SECURE:
+        raise RuntimeError(
+            "FUEL_COOKIE_SECURE=true is required when FUEL_COOKIE_SAMESITE=none."
+        )
+    if (
+        os.environ.get("FUEL_ENV", "").lower() == "production"
+        and not get_cors_origins()
+    ):
+        raise RuntimeError(
+            "Set FUEL_CORS_ORIGINS to the exact production frontend origin."
+        )
 
 
 def get_meter_tolerance_litres() -> float:

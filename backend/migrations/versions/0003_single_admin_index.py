@@ -23,6 +23,7 @@ def upgrade() -> None:
         ["role"],
         unique=True,
         sqlite_where=sa.text("role = 'admin'"),
+        postgresql_where=sa.text("role = 'admin'"),
     )
 
 

@@ -8,7 +8,7 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy.exc import IntegrityError
 
 from backend.app.core.config import METER_PHOTO_DIRECTORY
-from backend.app.db.session import SessionLocal
+from backend.app.db.session import SessionLocal, engine
 from backend.app.services.auth import bootstrap_admin
 from backend.app.services.demo_data import reset_demo_data, seed_demo_data
 
@@ -49,6 +49,9 @@ def bootstrap_first_admin() -> int:
 
 
 def seed_local_demo_data() -> int:
+    if engine.dialect.name != "sqlite":
+        print("Demo data commands are restricted to local SQLite.", file=sys.stderr)
+        return 2
     try:
         with SessionLocal.begin() as session:
             seed_demo_data(session)
@@ -65,6 +68,16 @@ def seed_local_demo_data() -> int:
 
 
 def reset_local_demo_data() -> int:
+    if engine.dialect.name != "sqlite":
+        print("Demo data commands are restricted to local SQLite.", file=sys.stderr)
+        return 2
+    if os.environ.get("FUEL_PHOTO_STORAGE", "local").strip().lower() != "local":
+        print(
+            "Demo data reset requires local photo storage; R2 objects are never "
+            "deleted by this command.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         with SessionLocal.begin() as session:
             photo_storage_keys = reset_demo_data(session)

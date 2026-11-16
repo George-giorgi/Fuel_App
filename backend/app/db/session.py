@@ -3,15 +3,14 @@ import sqlite3
 from collections.abc import Generator
 from pathlib import Path
 
-from sqlalchemy import URL, create_engine, event
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine, URL, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
-from backend.app.core.config import DATA_DIRECTORY, DATABASE_PATH
+from backend.app.core.config import PROJECT_ROOT, get_database_url
 
 
-DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
-DATABASE_URL = URL.create("sqlite", database=str(DATABASE_PATH))
+DATABASE_URL = get_database_url()
 
 
 def _enable_sqlite_foreign_keys(
@@ -22,13 +21,27 @@ def _enable_sqlite_foreign_keys(
     cursor.close()
 
 
-def create_database_engine(database_url: str | URL = DATABASE_URL) -> Engine:
-    url = make_url(database_url) if isinstance(database_url, str) else database_url
-    if url.get_backend_name() != "sqlite":
-        raise ValueError("The local Diesel Desk database must use SQLite.")
+def create_database_engine(database_url: str | URL | None = None) -> Engine:
+    url = (
+        make_url(database_url)
+        if isinstance(database_url, str)
+        else database_url or get_database_url()
+    )
+    if url.drivername in {"postgres", "postgresql"}:
+        url = url.set(drivername="postgresql+psycopg")
+    connect_args: dict[str, object] = {}
+    if url.get_backend_name() == "sqlite":
+        if url.database and url.database != ":memory:":
+            database_path = Path(url.database)
+            if not database_path.is_absolute():
+                database_path = PROJECT_ROOT / database_path
+            database_path.parent.mkdir(parents=True, exist_ok=True)
+            url = url.set(database=str(database_path))
+        connect_args["check_same_thread"] = False
 
-    engine = create_engine(url, connect_args={"check_same_thread": False})
-    event.listen(engine, "connect", _enable_sqlite_foreign_keys)
+    engine = create_engine(url, connect_args=connect_args, pool_pre_ping=True)
+    if url.get_backend_name() == "sqlite":
+        event.listen(engine, "connect", _enable_sqlite_foreign_keys)
     return engine
 
 

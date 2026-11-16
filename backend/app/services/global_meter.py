@@ -1,11 +1,9 @@
 from datetime import datetime, timezone
 import math
-from pathlib import Path
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import METER_PHOTO_DIRECTORY
 from backend.app.models import (
     Employee,
     FuelRecord,
@@ -14,6 +12,7 @@ from backend.app.models import (
     MeterPhoto,
     Vehicle,
 )
+from backend.app.services.photo_storage import read_photo
 
 
 class GlobalMeterConcurrentUpdate(ValueError):
@@ -332,9 +331,9 @@ def list_global_meter_history(
     ]
 
 
-def get_global_meter_photo_path(
+def get_global_meter_photo(
     session: Session, transaction_id: int
-) -> tuple[Path, str] | None:
+) -> tuple[bytes, str] | None:
     record = session.get(FuelRecord, transaction_id)
     if record is None or record.meter_photo_id is None:
         return None
@@ -342,11 +341,10 @@ def get_global_meter_photo_path(
     if photo is None:
         return None
 
-    directory = METER_PHOTO_DIRECTORY.resolve()
-    path = (directory / photo.storage_key).resolve()
-    if path.parent != directory or not path.is_file():
+    content = read_photo(photo.storage_key)
+    if content is None:
         return None
-    return path, photo.content_type
+    return content, photo.content_type
 
 
 def _timestamp_sort_value(value: datetime) -> float:

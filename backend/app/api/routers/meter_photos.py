@@ -1,4 +1,5 @@
 from typing import Annotated
+import logging
 
 from fastapi import (
     APIRouter,
@@ -16,6 +17,7 @@ from backend.app.api.dependencies import get_current_employee
 from backend.app.db.session import get_db_session
 from backend.app.models import Employee, MeterPhoto
 from backend.app.repositories.vehicles import get_vehicle_by_id
+from backend.app.repositories.meter_photos import get_meter_photo_by_id
 from backend.app.schemas.meter_photo import (
     MeterPhotoRead,
     MeterPhotoSessionRead,
@@ -33,6 +35,10 @@ from backend.app.services.meter_photos import (
     store_meter_photo,
     verify_meter_photo,
 )
+from backend.app.services.photo_storage import PhotoStorageError, read_photo
+
+
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["meter photos"])
 
 
@@ -112,6 +118,11 @@ async def upload_meter_photo(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except InvalidQrSession as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except PhotoStorageError as error:
+        logger.exception("Could not store an uploaded meter photo.")
+        raise HTTPException(
+            status_code=503, detail="Photo storage is temporarily unavailable."
+        ) from error
     except IntegrityError as error:
         raise HTTPException(
             status_code=409,
@@ -122,6 +133,34 @@ async def upload_meter_photo(
     return _meter_photo_read(
         stored_photo,
         registration_number,
+    )
+
+
+@router.get("/api/meter-photos/{meter_photo_id}/content")
+def read_meter_photo_content(
+    meter_photo_id: int,
+    session: Annotated[Session, Depends(get_db_session)],
+    employee: Annotated[Employee, Depends(get_current_employee)],
+) -> Response:
+    meter_photo = get_meter_photo_by_id(session, meter_photo_id)
+    if meter_photo is None or (
+        employee.role not in {"admin", "boss"}
+        and meter_photo.employee_id != employee.id
+    ):
+        raise HTTPException(status_code=404, detail="Meter photo not found.")
+    try:
+        content = read_photo(meter_photo.storage_key)
+    except PhotoStorageError as error:
+        logger.exception("Could not retrieve a meter photo.")
+        raise HTTPException(
+            status_code=503, detail="Photo storage is temporarily unavailable."
+        ) from error
+    if content is None:
+        raise HTTPException(status_code=404, detail="Meter photo not found.")
+    return Response(
+        content=content,
+        media_type=meter_photo.content_type,
+        headers={"Cache-Control": "private, no-store"},
     )
 
 

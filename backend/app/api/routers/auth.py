@@ -7,6 +7,7 @@ from backend.app.api.dependencies import get_current_employee
 from backend.app.core.config import (
     ACCESS_TOKEN_MINUTES,
     SESSION_COOKIE_NAME,
+    SESSION_COOKIE_SAMESITE,
     SESSION_COOKIE_SECURE,
 )
 from backend.app.core.rate_limit import login_rate_limiter
@@ -30,7 +31,10 @@ def login(
     http_request: Request,
     session: Annotated[Session, Depends(get_db_session)],
 ) -> Employee:
-    client_key = http_request.client.host if http_request.client else "unknown"
+    client_key = (
+        http_request.headers.get("x-forwarded-for")
+        or (http_request.client.host if http_request.client else "unknown")
+    )
     retry_after = login_rate_limiter.consume(client_key)
     if retry_after:
         raise HTTPException(
@@ -53,7 +57,7 @@ def login(
         value=token,
         max_age=ACCESS_TOKEN_MINUTES * 60,
         httponly=True,
-        samesite="strict",
+        samesite=SESSION_COOKIE_SAMESITE,
         secure=SESSION_COOKIE_SECURE,
         path="/",
     )
@@ -73,7 +77,7 @@ def logout(
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         httponly=True,
-        samesite="strict",
+        samesite=SESSION_COOKIE_SAMESITE,
         secure=SESSION_COOKIE_SECURE,
         path="/",
     )

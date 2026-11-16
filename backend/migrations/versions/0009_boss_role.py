@@ -18,8 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     connection = op.get_bind()
-    connection.commit()
-    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
     try:
         with op.batch_alter_table("employees") as batch_op:
             batch_op.drop_constraint("ck_employees_role", type_="check")
@@ -27,27 +30,29 @@ def upgrade() -> None:
                 "ck_employees_role",
                 "role IN ('admin', 'employee', 'boss')",
             )
-        op.create_index(
-            "uq_employees_username_lower",
-            "employees",
-            [sa.text("lower(username)")],
-            unique=True,
-        )
-        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
-        if violations:
-            raise RuntimeError(
-                f"Foreign key violations after migration: {violations}"
-            )
+        _ensure_username_index(connection)
+        if is_sqlite:
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).all()
+            if violations:
+                raise RuntimeError(
+                    f"Foreign key violations after migration: {violations}"
+                )
     finally:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.commit()
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
 
 
 def downgrade() -> None:
     connection = op.get_bind()
-    connection.commit()
-    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    is_sqlite = connection.dialect.name == "sqlite"
+    if is_sqlite:
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
     try:
         with op.batch_alter_table("employees") as batch_op:
             batch_op.drop_constraint("ck_employees_role", type_="check")
@@ -55,18 +60,31 @@ def downgrade() -> None:
                 "ck_employees_role",
                 "role IN ('admin', 'employee')",
             )
+        _ensure_username_index(connection)
+        if is_sqlite:
+            violations = connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).all()
+            if violations:
+                raise RuntimeError(
+                    f"Foreign key violations after migration: {violations}"
+                )
+    finally:
+        if is_sqlite:
+            connection.commit()
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
+
+
+def _ensure_username_index(connection) -> None:
+    index_names = {
+        index["name"]
+        for index in sa.inspect(connection).get_indexes("employees")
+    }
+    if "uq_employees_username_lower" not in index_names:
         op.create_index(
             "uq_employees_username_lower",
             "employees",
             [sa.text("lower(username)")],
             unique=True,
         )
-        violations = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
-        if violations:
-            raise RuntimeError(
-                f"Foreign key violations after migration: {violations}"
-            )
-    finally:
-        connection.commit()
-        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
-        connection.commit()

@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: diesel-desk-api
+    runtime: python
+    plan: free
+    buildCommand: python -m pip install -r requirements.txt && apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-eng
+    startCommand: python -m alembic upgrade head && python -m uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: FUEL_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: FUEL_AUTH_SECRET
+        generateValue: true
+      - key: FUEL_COOKIE_SECURE
+        value: "true"
+      - key: FUEL_COOKIE_SAMESITE
+        value: strict
+      - key: FUEL_CORS_ORIGINS
+        sync: false
+      - key: FUEL_PHOTO_STORAGE
+        value: r2
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: FUEL_OCR_PROVIDER
+        value: tesseract
+      - key: TESSERACT_CMD
+        value: /usr/bin/tesseract

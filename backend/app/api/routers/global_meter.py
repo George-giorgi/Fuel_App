@@ -1,7 +1,8 @@
 from typing import Annotated
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import require_management
@@ -16,12 +17,14 @@ from backend.app.schemas.global_meter import (
 from backend.app.services.global_meter import (
     GlobalMeterConcurrentUpdate,
     create_global_meter_event,
-    get_global_meter_photo_path,
+    get_global_meter_photo,
     get_global_meter_summary,
     list_global_meter_history,
 )
+from backend.app.services.photo_storage import PhotoStorageError
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/management/global-meter",
     tags=["global meter"],
@@ -72,13 +75,19 @@ def read_global_meter_transaction_photo(
     transaction_id: int,
     session: Annotated[Session, Depends(get_db_session)],
     _: Annotated[Employee, Depends(require_management)],
-) -> FileResponse:
-    stored_photo = get_global_meter_photo_path(session, transaction_id)
+) -> Response:
+    try:
+        stored_photo = get_global_meter_photo(session, transaction_id)
+    except PhotoStorageError as error:
+        logger.exception("Could not retrieve a global meter photo.")
+        raise HTTPException(
+            status_code=503, detail="Photo storage is temporarily unavailable."
+        ) from error
     if stored_photo is None:
         raise HTTPException(status_code=404, detail="Meter photo not found.")
-    path, content_type = stored_photo
-    return FileResponse(
-        path,
+    content, content_type = stored_photo
+    return Response(
+        content=content,
         media_type=content_type,
         headers={"Cache-Control": "private, no-store"},
     )

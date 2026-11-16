@@ -1,17 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
-import logging
 import math
-import os
-from pathlib import Path
 import secrets
 import warnings
 
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import METER_PHOTO_DIRECTORY
 from backend.app.models import Employee, MeterPhoto, QrSession, Vehicle
 from backend.app.repositories.meter_photos import (
     add_meter_photo,
@@ -27,6 +23,7 @@ from backend.app.repositories.vehicles import (
 )
 from backend.app.services.vehicles import QR_PAYLOAD_PREFIX
 from backend.app.services.meter_ocr import extract_meter_readings
+from backend.app.services.photo_storage import store_photo
 
 
 QR_SESSION_MINUTES = 10
@@ -36,7 +33,6 @@ PHOTO_TYPES = {
     "image/jpeg": ("JPEG", ".jpg"),
     "image/png": ("PNG", ".png"),
 }
-logger = logging.getLogger(__name__)
 
 
 class UnsupportedMeterPhotoType(ValueError):
@@ -134,28 +130,6 @@ def validate_meter_photo(content: bytes, content_type: str | None) -> str:
     return photo_type[1]
 
 
-def _store_private_photo(content: bytes, extension: str) -> tuple[str, Path]:
-    METER_PHOTO_DIRECTORY.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(METER_PHOTO_DIRECTORY, 0o700)
-    storage_key = f"{secrets.token_hex(16)}{extension}"
-    destination = METER_PHOTO_DIRECTORY / storage_key
-    descriptor = os.open(
-        destination,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        0o600,
-    )
-    try:
-        with os.fdopen(descriptor, "wb") as stored_file:
-            stored_file.write(content)
-    except OSError:
-        try:
-            destination.unlink(missing_ok=True)
-        except OSError:
-            logger.exception("Could not remove a partial meter photo.")
-        raise
-    return storage_key, destination
-
-
 def store_meter_photo(
     session: Session,
     employee: Employee,
@@ -185,8 +159,13 @@ def store_meter_photo(
         raise InvalidQrSession("The QR session vehicle is no longer active.")
 
     extension = validate_meter_photo(content, content_type)
-    storage_key, stored_path = _store_private_photo(content, extension)
-    session.info.setdefault("rollback_upload_paths", []).append(stored_path)
+    storage_key, stored_path = store_photo(
+        content,
+        extension,
+        content_type or "",
+    )
+    if stored_path is not None:
+        session.info.setdefault("rollback_upload_paths", []).append(stored_path)
 
     meter_photo = MeterPhoto(
         qr_session_id=qr_session.id,

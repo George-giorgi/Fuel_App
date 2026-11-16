@@ -26,6 +26,9 @@ from backend.app.api.routers.admin import (
     change_employee_role as change_employee_role_endpoint,
     change_employee_status as change_employee_status_endpoint,
 )
+from backend.app.api.routers.meter_photos import (
+    read_meter_photo_content as read_meter_photo_content_endpoint,
+)
 from backend.app.api.routers.fuel_records import read_fuel_records
 from backend.app.api.dependencies import (
     get_current_employee,
@@ -162,7 +165,7 @@ class DatabaseTests(unittest.TestCase):
         with TemporaryDirectory() as upload_directory:
             with (
                 patch(
-                    "backend.app.services.meter_photos.METER_PHOTO_DIRECTORY",
+                    "backend.app.services.photo_storage.METER_PHOTO_DIRECTORY",
                     Path(upload_directory),
                 ),
                 patch(
@@ -233,9 +236,12 @@ class DatabaseTests(unittest.TestCase):
         finally:
             session_generator.close()
 
-    def test_non_sqlite_database_urls_are_rejected(self) -> None:
-        with self.assertRaises(ValueError):
-            create_database_engine("postgresql://localhost/unused")
+    def test_postgresql_database_urls_are_supported(self) -> None:
+        engine = create_database_engine("postgresql://localhost/unused")
+        try:
+            self.assertEqual(engine.url.drivername, "postgresql+psycopg")
+        finally:
+            engine.dispose()
 
     def test_empty_registry_does_not_authenticate_or_identify(self) -> None:
         with Session(self.engine) as session:
@@ -712,7 +718,7 @@ class DatabaseTests(unittest.TestCase):
         image_data = image_buffer.getvalue()
         with TemporaryDirectory() as upload_directory:
             with patch(
-                "backend.app.services.meter_photos.METER_PHOTO_DIRECTORY",
+                "backend.app.services.photo_storage.METER_PHOTO_DIRECTORY",
                 Path(upload_directory),
             ):
                 with Session(self.engine) as session, session.begin():
@@ -763,9 +769,10 @@ class DatabaseTests(unittest.TestCase):
                             image_data,
                             "image/png",
                         )
-
                     qr_session = create_qr_session(session, employee, qr_payload)
+                    self.assertIsNotNone(qr_session)
                     session_token, registration, _ = qr_session
+                    self.assertEqual(registration, "AB12 CDE")
                     with self.assertRaises(InvalidQrSession):
                         store_meter_photo(
                             session,
@@ -799,6 +806,63 @@ class DatabaseTests(unittest.TestCase):
                             image_data,
                             "image/png",
                         )
+
+    def test_meter_photo_retrieval_is_limited_to_owner_or_management(self) -> None:
+        image_buffer = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(image_buffer, format="PNG")
+        image_data = image_buffer.getvalue()
+        with TemporaryDirectory() as upload_directory:
+            with (
+                patch(
+                    "backend.app.services.photo_storage.METER_PHOTO_DIRECTORY",
+                    Path(upload_directory),
+                ),
+                patch(
+                    "backend.app.services.meter_photos.extract_meter_readings",
+                    return_value=MeterOcrResult(status="unavailable"),
+                ),
+                Session(self.engine) as session,
+                session.begin(),
+            ):
+                employee = create_employee(
+                    session,
+                    "photo-owner@example.test",
+                    "Photo Owner",
+                    "temporary-password",
+                )
+                outsider = create_employee(
+                    session,
+                    "photo-outsider@example.test",
+                    "Photo Outsider",
+                    "temporary-password",
+                )
+                vehicle = create_vehicle(session, "ph12 oto")
+                employee.vehicles.append(vehicle)
+                photo_session = create_assigned_vehicle_photo_session(
+                    session, employee
+                )
+                self.assertIsNotNone(photo_session)
+                meter_photo, _ = store_meter_photo(
+                    session,
+                    employee,
+                    photo_session[0],
+                    image_data,
+                    "image/png",
+                )
+
+                response = read_meter_photo_content_endpoint(
+                    meter_photo.id,
+                    session,
+                    employee,
+                )
+                self.assertEqual(response.body, image_data)
+                with self.assertRaises(HTTPException) as error:
+                    read_meter_photo_content_endpoint(
+                        meter_photo.id,
+                        session,
+                        outsider,
+                    )
+                self.assertEqual(error.exception.status_code, 404)
 
     def test_assigned_vehicle_photo_session_uses_only_employee_vehicle(self) -> None:
         with Session(self.engine) as session, session.begin():
@@ -1718,7 +1782,7 @@ class DatabaseTests(unittest.TestCase):
         image_data = image_buffer.getvalue()
         with TemporaryDirectory() as upload_directory:
             with patch(
-                "backend.app.services.meter_photos.METER_PHOTO_DIRECTORY",
+                "backend.app.services.photo_storage.METER_PHOTO_DIRECTORY",
                 Path(upload_directory),
             ):
                 with Session(self.engine) as session:
