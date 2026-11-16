@@ -42,6 +42,34 @@ def _candidate_ocr_result() -> MeterOcrResult:
 
 
 class PiusiOcrTests(unittest.TestCase):
+    def test_current_fill_rejects_a_truncated_three_digit_reading(self) -> None:
+        display = np.zeros((100, 200, 3), dtype=np.uint8)
+        boxes = [
+            (20, 20, 20, 60),
+            (70, 20, 20, 60),
+            (120, 20, 20, 60),
+        ]
+
+        with (
+            patch.object(piusi_lcd, "_group_components", return_value=boxes),
+            patch.object(
+                piusi_lcd, "_classify_glyph", return_value=("0", 0.9)
+            ),
+        ):
+            result = piusi_lcd._recognize_row(
+                display,
+                (0, 0, 1, 1),
+                minimum_digits=3,
+                split_wide_glyphs=False,
+                segment_threshold=0.35,
+                whole_number=True,
+                expected_digits=5,
+                adaptive_masks=False,
+                minimum_agreeing_masks=1,
+            )
+
+        self.assertIsNone(result.raw_digits)
+
     def test_reference_reads_current_fill_and_whole_cumulative_total(self) -> None:
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
         example = labels["examples"][0]

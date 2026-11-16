@@ -457,6 +457,7 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         split_wide_glyphs=False,
         segment_threshold=0.35,
         whole_number=True,
+        expected_digits=5,
         adaptive_masks=False,
         minimum_agreeing_masks=1,
     )
