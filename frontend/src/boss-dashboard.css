@@ -1,0 +1,2512 @@
+.boss-dashboard {
+  min-height: 100vh;
+  background:
+    radial-gradient(ellipse at 75% -12%, color-mix(in srgb, var(--teal) 10%, transparent), transparent 42%),
+    var(--paper);
+  color: var(--ink);
+}
+
+.boss-dashboard-embedded {
+  min-height: 0;
+}
+
+.boss-header {
+  position: sticky;
+  z-index: 20;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 76px;
+  padding: 10px clamp(18px, 4vw, 58px);
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.boss-brand,
+.boss-header-nav,
+.boss-dashboard-tabs,
+.boss-header-actions,
+.boss-clock,
+.boss-profile-button,
+.boss-panel-heading,
+.boss-kpi-top,
+.boss-chart-heading,
+.boss-range-switch,
+.boss-section-title,
+.boss-fleet-toolbar,
+.boss-pagination,
+.boss-detail-heading,
+.boss-personal-intro,
+.boss-personal-stats,
+.boss-transaction-row,
+.boss-popover-heading {
+  display: flex;
+  align-items: center;
+}
+
+.boss-brand {
+  min-width: 230px;
+  gap: 12px;
+}
+
+.boss-brand img {
+  display: block;
+  width: 82px;
+  height: 46px;
+  object-fit: contain;
+}
+
+.boss-brand-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.boss-brand-copy span,
+.boss-overline {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+}
+
+.boss-brand-copy strong {
+  font-size: 12px;
+  letter-spacing: -0.02em;
+}
+
+.boss-header-nav {
+  gap: clamp(14px, 2.5vw, 34px);
+  margin: 0 auto;
+}
+
+.boss-header-nav a {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: color 140ms ease;
+}
+
+.boss-header-nav a:hover {
+  color: var(--teal);
+}
+
+.boss-dashboard-tabs {
+  flex: 0 0 auto;
+  gap: 4px;
+  margin: 0 auto;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.boss-dashboard-tabs button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.boss-dashboard-tabs button.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 4px #00000012;
+}
+
+.boss-dashboard-tabs button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.boss-fuel-panel {
+  width: min(1050px, 100%);
+  margin: 0 auto;
+}
+
+.boss-fuel-entry-section {
+  margin: 0;
+}
+
+.boss-header-actions {
+  gap: 12px;
+}
+
+.boss-clock {
+  gap: 7px;
+  padding-right: 12px;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.boss-popover-anchor {
+  position: relative;
+}
+
+.boss-icon-button,
+.boss-small-icon-button {
+  display: inline-grid;
+  position: relative;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.boss-icon-button:hover,
+.boss-small-icon-button:hover {
+  border-color: var(--teal);
+  color: var(--teal);
+  transform: translateY(-1px);
+}
+
+.boss-notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -5px;
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 99px;
+  background: #d65b45;
+  color: white;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.boss-profile-button {
+  min-height: 42px;
+  gap: 9px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.boss-profile-button:hover,
+.boss-profile-button[aria-expanded='true'] {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
+.boss-avatar {
+  display: grid;
+  flex: 0 0 31px;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--teal) 19%, var(--surface));
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.boss-profile-copy {
+  display: grid;
+  gap: 3px;
+}
+
+.boss-profile-copy strong {
+  max-width: 140px;
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-profile-copy small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 13px);
+  right: 0;
+  width: min(360px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 18px 60px #06120d33;
+}
+
+.boss-notification-popover {
+  padding: 18px 0 7px;
+}
+
+.boss-popover-heading {
+  justify-content: space-between;
+  padding: 0 16px 13px;
+}
+
+.boss-popover-heading h2 {
+  margin: 5px 0 0;
+  font-size: 15px;
+}
+
+.boss-small-icon-button {
+  width: 30px;
+  height: 30px;
+}
+
+.boss-notification-list {
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.boss-notification-list li {
+  border-top: 1px solid var(--line);
+}
+
+.boss-notification-item {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 9px minmax(0, 1fr) 7px;
+  align-items: start;
+  gap: 10px;
+  padding: 13px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.boss-notification-item:hover {
+  background: var(--surface-muted);
+}
+
+.boss-notification-item > span:nth-child(2) {
+  display: grid;
+  gap: 4px;
+}
+
+.boss-notification-item strong {
+  font-size: 10px;
+}
+
+.boss-notification-item small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.boss-notification-dot,
+.boss-unread-indicator {
+  width: 7px;
+  height: 7px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--teal);
+}
+
+.severity-urgent .boss-notification-dot {
+  background: #d65b45;
+}
+
+.severity-warning .boss-notification-dot {
+  background: #d29b43;
+}
+
+.boss-unread-indicator {
+  background: var(--teal);
+}
+
+.boss-popover-empty,
+.boss-table-empty {
+  padding: 18px;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.boss-profile-popover {
+  width: 236px;
+  padding: 8px;
+}
+
+.boss-profile-menu-identity {
+  display: grid;
+  gap: 5px;
+  padding: 10px 9px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.boss-profile-menu-identity strong {
+  font-size: 11px;
+}
+
+.boss-profile-menu-identity small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+}
+
+.boss-profile-popover > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+}
+
+.boss-profile-popover > button:hover {
+  background: var(--surface-muted);
+}
+
+.boss-back-button {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.boss-content {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 26px clamp(16px, 3vw, 42px) 20px;
+}
+
+@keyframes boss-view-enter {
+  from {
+    opacity: 0.72;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.boss-content-summary,
+.boss-content-fuel {
+  animation: boss-view-enter 160ms ease-out both;
+}
+
+.boss-welcome,
+.boss-section-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.boss-overline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 7px;
+}
+
+.boss-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #51aa79;
+  box-shadow: 0 0 0 3px color-mix(in srgb, #51aa79 18%, transparent);
+}
+
+.boss-welcome h1 {
+  margin: 0;
+  font-size: clamp(27px, 3.2vw, 39px);
+  font-weight: 730;
+  letter-spacing: -0.055em;
+}
+
+.boss-welcome > div > p:last-child,
+.boss-section-title > div > p:last-child {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.boss-refresh-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 39px;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.boss-refresh-button:hover {
+  border-color: var(--teal);
+}
+
+.boss-refresh-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.boss-error-banner,
+.boss-data-notice,
+.boss-inline-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  border: 1px solid color-mix(in srgb, #d65b45 30%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, #d65b45 8%, var(--surface));
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.boss-error-banner > span {
+  flex: 1;
+}
+
+.boss-error-banner button {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.boss-loading {
+  display: flex;
+  min-height: 180px;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.boss-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line);
+  border-top-color: var(--teal);
+  border-radius: 50%;
+  animation: boss-spin 800ms linear infinite;
+}
+
+@keyframes boss-spin {
+  to { transform: rotate(360deg); }
+}
+
+.boss-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.boss-kpi-card,
+.boss-panel {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.boss-kpi-card {
+  display: flex;
+  min-height: 116px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 9px;
+  padding: 13px;
+}
+
+.boss-kpi-top {
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.boss-kpi-icon {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--teal) 13%, var(--surface-muted));
+  color: var(--teal);
+}
+
+.tone-green .boss-kpi-icon {
+  background: color-mix(in srgb, #4da66b 14%, var(--surface-muted));
+  color: #4da66b;
+}
+
+.tone-blue .boss-kpi-icon {
+  background: color-mix(in srgb, #568eb6 14%, var(--surface-muted));
+  color: #6fa7cc;
+}
+
+.tone-amber .boss-kpi-icon {
+  background: color-mix(in srgb, #d29b43 15%, var(--surface-muted));
+  color: #d29b43;
+}
+
+.tone-red .boss-kpi-icon {
+  background: color-mix(in srgb, #d65b45 15%, var(--surface-muted));
+  color: #d65b45;
+}
+
+.boss-kpi-card > strong {
+  overflow: hidden;
+  font-size: clamp(20px, 2vw, 28px);
+  font-weight: 740;
+  letter-spacing: -0.055em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-kpi-card > small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.boss-data-notice {
+  margin-bottom: 12px;
+  border-color: color-mix(in srgb, #d29b43 34%, var(--line));
+  background: color-mix(in srgb, #d29b43 8%, var(--surface));
+}
+
+.boss-notice-mark {
+  display: grid;
+  flex: 0 0 23px;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, #d29b43 18%, var(--surface));
+  color: #d29b43;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.boss-data-notice p {
+  flex: 1;
+  margin: 0;
+}
+
+.boss-notice-unit {
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.boss-main-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "nct personal"
+    "analytics analytics";
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.boss-nct-panel {
+  grid-area: nct;
+}
+
+.boss-analytics-panel {
+  grid-area: analytics;
+  margin-bottom: 0;
+}
+
+.boss-personal-panel {
+  grid-area: personal;
+  margin-bottom: 0;
+}
+
+.boss-nct-panel,
+.boss-analytics-panel,
+.boss-personal-panel {
+  padding: 16px;
+}
+
+.boss-panel-heading {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.boss-panel-heading h2,
+.boss-personal-intro h2 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: -0.035em;
+}
+
+.boss-panel-heading .boss-overline,
+.boss-personal-intro .boss-overline {
+  margin-bottom: 6px;
+}
+
+.boss-fleet-count {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.boss-detail-grid span {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-detail-grid strong {
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.boss-panel-footnote {
+  margin: 10px 0 0;
+  color: #d29b43;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.boss-nct-heading-copy h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.035em;
+}
+
+.boss-nct-heading-copy p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.boss-nct-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 12px;
+}
+
+.boss-nct-stat {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+
+.boss-nct-stat strong {
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 730;
+  line-height: 1;
+}
+
+.boss-nct-stat span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.boss-nct-stat.status-valid strong {
+  color: #55a971;
+}
+
+.boss-nct-stat.status-upcoming strong {
+  color: #d29b43;
+}
+
+.boss-nct-stat.status-expired strong {
+  color: #d65b45;
+}
+
+.boss-nct-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.boss-nct-list li {
+  border-top: 1px solid var(--line);
+}
+
+.boss-nct-list button {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.4fr) minmax(100px, 0.7fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.boss-nct-list button:hover {
+  background: var(--surface-muted);
+}
+
+.boss-nct-vehicle,
+.boss-nct-expiry {
+  display: grid;
+  min-width: 0;
+}
+
+.boss-nct-vehicle {
+  gap: 3px;
+}
+
+.boss-nct-vehicle strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-nct-vehicle small,
+.boss-nct-expiry small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-nct-expiry {
+  gap: 3px;
+  justify-items: end;
+}
+
+.boss-nct-expiry time {
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.boss-nct-status {
+  width: fit-content;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #d29b43 13%, var(--surface));
+  color: #d29b43;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.boss-nct-status.status-expired,
+.boss-nct-status.status-urgent {
+  background: color-mix(in srgb, #d65b45 14%, var(--surface));
+  color: #d65b45;
+}
+
+.boss-nct-status.status-expires_today {
+  background: color-mix(in srgb, #d65b45 14%, var(--surface));
+  color: #d65b45;
+}
+
+.boss-nct-empty {
+  margin: 0;
+  padding: 14px 10px;
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.boss-analytics-panel {
+  scroll-margin-top: 92px;
+}
+
+.boss-analytics-heading {
+  align-items: start;
+}
+
+.boss-analytics-heading h2 {
+  margin: 0;
+  font-size: 19px;
+  letter-spacing: -0.04em;
+}
+
+.boss-analytics-heading > div:first-child > p:last-child {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.boss-range-switch {
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.boss-range-switch button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.boss-range-switch button.active {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 2px 6px #00000012;
+}
+
+.boss-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.boss-chart-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+
+.boss-chart-heading {
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 39px;
+}
+
+.boss-chart-heading h3,
+.boss-usage-list h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.boss-chart-heading span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-chart-heading > strong {
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.boss-chart-heading > strong small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.boss-chart-wrap {
+  min-height: 0;
+  margin-top: 5px;
+}
+
+.boss-line-chart,
+.boss-bar-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 165px;
+  overflow: visible;
+}
+
+.boss-chart-gridline {
+  stroke: var(--line);
+  stroke-dasharray: 3 5;
+  stroke-width: 1;
+}
+
+.boss-chart-area {
+  fill: color-mix(in srgb, var(--teal) 17%, transparent);
+}
+
+.boss-chart-line {
+  fill: none;
+  stroke: var(--teal);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.boss-chart-point {
+  fill: var(--surface);
+  stroke: var(--teal);
+  stroke-width: 2;
+}
+
+.boss-chart-bar {
+  fill: color-mix(in srgb, #82b997 76%, var(--teal));
+}
+
+.boss-chart-label {
+  fill: var(--muted);
+  font-family: inherit;
+  font-size: 9px;
+}
+
+.boss-chart-empty {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.boss-chart-caption {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-usage-comparison {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.boss-comparison-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.boss-comparison-title small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-comparison-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.boss-usage-list h3 {
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+.boss-usage-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.75fr) minmax(45px, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  margin-top: 8px;
+}
+
+.boss-usage-row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.boss-usage-row > div:first-child span {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.boss-usage-row small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.boss-usage-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--line);
+}
+
+.boss-usage-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--teal);
+}
+
+.boss-usage-row > strong {
+  min-width: 54px;
+  font-size: 9px;
+  text-align: right;
+}
+
+.boss-personal-panel {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+  overflow: hidden;
+  border-color: color-mix(in srgb, #d29b43 28%, var(--line));
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, #d29b43 8%, var(--surface)),
+      var(--surface) 64%
+    );
+  box-shadow:
+    var(--card-shadow),
+    inset 3px 0 0 color-mix(in srgb, #d29b43 76%, transparent);
+}
+
+.boss-personal-intro {
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.boss-personal-icon {
+  display: grid;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, #d29b43 17%, var(--surface-muted));
+  color: color-mix(in srgb, #d29b43 65%, var(--ink));
+}
+
+.boss-personal-heading-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.boss-personal-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.boss-personal-heading-row .boss-overline {
+  margin: 0;
+}
+
+.boss-personal-separation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, #d29b43 36%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, #d29b43 10%, var(--surface));
+  color: var(--ink);
+  font-size: 8px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.boss-personal-separation::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d29b43;
+  content: "";
+}
+
+.boss-personal-intro p:last-child {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.boss-personal-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.7fr);
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.boss-personal-summary {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.boss-personal-summary > strong {
+  font-size: 19px;
+  letter-spacing: -0.04em;
+}
+
+.boss-personal-summary > span,
+.boss-personal-summary > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.boss-personal-empty {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, #d29b43 42%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, #d29b43 6%, var(--surface));
+}
+
+.boss-personal-empty strong {
+  font-size: 11px;
+}
+
+.boss-personal-empty span,
+.boss-personal-form-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.boss-personal-car-scene {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 92px;
+  align-items: flex-end;
+  justify-content: center;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #d29b43 22%, var(--line));
+  border-radius: 10px;
+  background:
+    radial-gradient(
+      ellipse at 72% 14%,
+      color-mix(in srgb, #d29b43 12%, transparent),
+      transparent 42%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface) 72%, transparent) 0 58%,
+      color-mix(in srgb, #d29b43 8%, var(--surface-muted)) 58% 100%
+    );
+}
+
+.boss-personal-horizon,
+.boss-personal-road,
+.boss-personal-road-mark {
+  position: absolute;
+  right: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+.boss-personal-horizon {
+  bottom: 30px;
+  height: 1px;
+  background: color-mix(in srgb, #d29b43 20%, var(--line));
+}
+
+.boss-personal-road {
+  bottom: 12px;
+  height: 1px;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+}
+
+.boss-personal-road-mark {
+  bottom: 5px;
+  left: 50%;
+  width: 34px;
+  height: 2px;
+  background: color-mix(in srgb, var(--ink) 30%, transparent);
+  animation: boss-personal-road-move 1.8s linear infinite;
+}
+
+.boss-personal-car {
+  z-index: 1;
+  width: min(174px, 54%);
+  height: auto;
+  margin-bottom: 5px;
+  overflow: visible;
+  animation: boss-personal-car-cruise 4.2s ease-in-out infinite;
+}
+
+.boss-personal-car-shadow {
+  fill: color-mix(in srgb, var(--ink) 15%, transparent);
+}
+
+.boss-personal-car-body {
+  fill: var(--teal);
+}
+
+.boss-personal-car-window {
+  fill: color-mix(in srgb, var(--surface) 38%, #294b44);
+}
+
+.boss-personal-car-trim {
+  fill: none;
+  stroke: color-mix(in srgb, var(--ink) 18%, transparent);
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.boss-personal-car-light {
+  fill: #f5cb6b;
+}
+
+.boss-personal-car-wheel {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: boss-personal-wheel-spin 1.7s linear infinite;
+}
+
+.boss-personal-car-wheel circle {
+  fill: color-mix(in srgb, var(--ink) 76%, #111);
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+
+.boss-personal-car-wheel path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--surface) 70%, #aeb9b3);
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+
+@keyframes boss-personal-car-cruise {
+  0%,
+  100% {
+    transform: translateX(-6px) translateY(0);
+  }
+
+  50% {
+    transform: translateX(6px) translateY(-2px);
+  }
+}
+
+@keyframes boss-personal-wheel-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes boss-personal-road-move {
+  from {
+    transform: translateX(-55px);
+  }
+
+  to {
+    transform: translateX(55px);
+  }
+}
+
+.boss-personal-summary > small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-personal-stats {
+  gap: 35px;
+  margin-top: 9px;
+}
+
+.boss-personal-stats span {
+  display: grid;
+  gap: 4px;
+}
+
+.boss-personal-stats small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-personal-stats strong {
+  font-size: 12px;
+}
+
+.boss-personal-form {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.boss-personal-form label,
+.boss-filter > span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.boss-personal-form select,
+.boss-filter select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.boss-personal-form select:disabled {
+  opacity: 0.65;
+}
+
+.boss-primary-button {
+  min-height: 37px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--teal);
+  color: #10211a;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.boss-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.boss-form-error {
+  margin: 0;
+  color: #d65b45;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.boss-personal-history {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.boss-personal-history h3,
+.boss-vehicle-detail h4 {
+  margin: 0 0 10px;
+  font-size: 11px;
+}
+
+.boss-employee-section {
+  margin-top: 26px;
+  scroll-margin-top: 92px;
+}
+
+.boss-employee-toolbar {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.boss-employee-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.boss-employee-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.boss-employee-card:hover,
+.boss-employee-card.selected {
+  border-color: var(--teal);
+  box-shadow: var(--card-shadow);
+  transform: translateY(-1px);
+}
+
+.boss-employee-card:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.boss-employee-card-top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.boss-employee-avatar {
+  display: grid;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--teal) 18%, var(--line));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--teal) 9%, var(--surface));
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.boss-employee-identity {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.boss-employee-identity strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-employee-identity small,
+.boss-employee-card-foot {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.boss-employee-status {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.boss-employee-status.active {
+  background: color-mix(in srgb, #4da66b 13%, var(--surface));
+  color: #438d5a;
+}
+
+.boss-employee-status.inactive {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.boss-employee-card-vehicles {
+  display: block;
+  overflow: hidden;
+  padding: 7px 8px;
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-employee-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.boss-employee-card-metrics > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.boss-employee-card-metrics small,
+.boss-employee-detail-summary small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-employee-card-metrics strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-employee-card-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.boss-employee-card-foot > span {
+  color: var(--teal);
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.boss-employee-empty {
+  margin-top: 10px;
+}
+
+.boss-employee-detail {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+  scroll-margin-top: 92px;
+}
+
+.boss-employee-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.boss-employee-detail-summary > span {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.boss-employee-detail-summary strong {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.boss-employee-assignment {
+  display: grid;
+  gap: 8px;
+  margin: 9px 0 13px;
+  font-size: 10px;
+}
+
+.boss-employee-assignment > span {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.boss-employee-vehicle-tag {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.boss-employee-history-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.boss-employee-history-heading h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.boss-employee-history-heading p,
+.boss-employee-history-heading > span {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.boss-employee-date-filter {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.boss-employee-date-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.boss-employee-date-presets button {
+  min-height: 31px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.boss-employee-date-presets button:hover,
+.boss-employee-date-presets button.selected {
+  border-color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 10%, var(--surface));
+  color: var(--teal);
+}
+
+.boss-employee-date-inputs {
+  display: flex;
+  gap: 8px;
+}
+
+.boss-employee-date-inputs label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.boss-employee-date-inputs input {
+  min-height: 32px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+
+.boss-employee-range-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.boss-employee-range-summary > span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.boss-employee-range-summary small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-employee-range-summary strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-employee-date-error {
+  margin: 0 0 10px;
+  color: #d65b45;
+  font-size: 10px;
+}
+
+.boss-employee-record-table {
+  min-width: 860px;
+}
+
+.boss-employee-record-table th {
+  height: 42px;
+  font-size: 10px;
+}
+
+.boss-employee-record-table td {
+  padding-top: 12px;
+  padding-bottom: 12px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.boss-record-check {
+  display: inline-block;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: capitalize;
+}
+
+.boss-record-check.status-discrepancy {
+  background: color-mix(in srgb, #d65b45 13%, var(--surface));
+  color: #d65b45;
+}
+
+.boss-record-check.status-matched {
+  background: color-mix(in srgb, #4da66b 13%, var(--surface));
+  color: #438d5a;
+}
+
+.boss-fleet-section {
+  scroll-margin-top: 92px;
+}
+
+.boss-section-title {
+  margin-bottom: 13px;
+}
+
+.boss-section-title h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.04em;
+}
+
+.boss-fleet-count {
+  color: var(--muted);
+}
+
+.boss-fleet-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(145px, 180px) minmax(145px, 180px);
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-muted);
+}
+
+.boss-fleet-search {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.boss-fleet-search > label {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.boss-fleet-search-control {
+  width: 100%;
+  min-height: 40px;
+  flex: initial;
+  background: var(--surface);
+}
+
+.boss-fleet-search-control input {
+  font-size: 11px;
+}
+
+.boss-search-clear {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.boss-search-clear:hover {
+  background: var(--surface-muted);
+  color: var(--ink);
+}
+
+.boss-search {
+  display: flex;
+  flex: 1 1 280px;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+}
+
+.boss-search:focus-within {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.boss-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.boss-search input::placeholder {
+  color: var(--muted);
+}
+
+.boss-filter {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.boss-filter select {
+  min-height: 40px;
+}
+
+.boss-inline-error {
+  border-color: color-mix(in srgb, #d65b45 30%, var(--line));
+  color: #d65b45;
+}
+
+.boss-table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.boss-fleet-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 800px;
+  text-align: left;
+}
+
+.boss-fleet-table th {
+  height: 39px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.boss-fleet-table th button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.boss-sort-mark {
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+  font-size: 12px;
+}
+
+.boss-sort-mark.active {
+  color: var(--teal);
+}
+
+.boss-fleet-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 9px;
+  vertical-align: middle;
+}
+
+.boss-fleet-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.boss-fleet-table tbody tr:hover,
+.boss-fleet-table tbody tr.selected {
+  background: color-mix(in srgb, var(--teal) 5%, var(--surface));
+}
+
+.boss-vehicle-link {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.boss-vehicle-link strong {
+  font-size: 10px;
+}
+
+.boss-vehicle-link small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.boss-vehicle-link:hover strong {
+  color: var(--teal);
+}
+
+.boss-vehicle-status,
+.boss-nct-table-status {
+  display: inline-block;
+  padding: 4px 6px;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.boss-vehicle-status.active,
+.boss-nct-table-status.status-valid {
+  background: color-mix(in srgb, #4da66b 13%, var(--surface));
+  color: #55a971;
+}
+
+.boss-vehicle-status.inactive,
+.boss-nct-table-status.status-not_set {
+  background: var(--surface-muted);
+  color: var(--muted);
+}
+
+.boss-nct-table-status.status-expired,
+.boss-nct-table-status.status-expires_today {
+  background: color-mix(in srgb, #d65b45 13%, var(--surface));
+  color: #d65b45;
+}
+
+.boss-nct-table-status.status-urgent,
+.boss-nct-table-status.status-upcoming {
+  background: color-mix(in srgb, #d29b43 13%, var(--surface));
+  color: #d29b43;
+}
+
+.boss-pagination {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 2px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.boss-pagination > div {
+  display: flex;
+  gap: 6px;
+}
+
+.boss-pagination button {
+  min-height: 31px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.boss-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.boss-vehicle-detail {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.boss-detail-heading {
+  justify-content: space-between;
+  margin-bottom: 15px;
+}
+
+.boss-detail-heading .boss-overline {
+  margin-bottom: 4px;
+}
+
+.boss-detail-heading h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.boss-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.boss-transactions {
+  display: grid;
+}
+
+.boss-transaction-row {
+  gap: 9px;
+  min-height: 42px;
+  border-top: 1px solid var(--line);
+}
+
+.boss-transaction-mark {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--teal) 12%, var(--surface-muted));
+  color: var(--teal);
+}
+
+.boss-transaction-row > div {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.boss-transaction-row strong {
+  font-size: 9px;
+}
+
+.boss-transaction-row small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-transaction-cost {
+  color: var(--muted);
+  font-size: 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.boss-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.admin-registry-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.admin-registry-checkbox input {
+  width: 15px;
+  min-height: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--teal);
+}
+
+.admin-registry-form .admin-registry-field-hint {
+  display: block;
+  margin-top: 4px;
+}
+
+@media (max-width: 1180px) {
+  .boss-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .boss-header {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .boss-header-nav {
+    order: 3;
+    flex: 1 0 100%;
+    justify-content: flex-start;
+    gap: 19px;
+    margin: 0;
+    overflow-x: auto;
+    padding: 3px 0 4px;
+    scrollbar-width: none;
+  }
+
+  .boss-dashboard-tabs {
+    order: 2;
+    margin-left: 0;
+  }
+
+  .boss-header-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .boss-header-nav a {
+    flex: 0 0 auto;
+  }
+
+  .boss-brand {
+    flex: 1;
+  }
+
+  .boss-clock {
+    display: none;
+  }
+
+  .boss-main-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "nct"
+      "personal"
+      "analytics";
+    gap: 12px;
+  }
+
+  .boss-nct-panel,
+  .boss-analytics-panel,
+  .boss-personal-panel {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 640px) {
+  .boss-header {
+    min-height: 62px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .boss-brand {
+    min-width: 0;
+    gap: 7px;
+  }
+
+  .boss-brand img {
+    width: 56px;
+    height: 37px;
+  }
+
+  .boss-brand-copy span {
+    font-size: 8px;
+  }
+
+  .boss-brand-copy strong {
+    font-size: 11px;
+  }
+
+  .boss-header-actions {
+    gap: 6px;
+  }
+
+  .boss-icon-button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .boss-profile-button {
+    min-height: 35px;
+    padding-left: 2px;
+  }
+
+  .boss-profile-copy,
+  .boss-profile-button > svg {
+    display: none;
+  }
+
+  .boss-content {
+    padding: 20px 12px 16px;
+  }
+
+  .boss-welcome {
+    align-items: start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .boss-welcome h1 {
+    font-size: 27px;
+  }
+
+  .boss-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .boss-kpi-card {
+    min-height: 110px;
+    padding: 12px;
+  }
+
+  .boss-kpi-top {
+    font-size: 9px;
+  }
+
+  .boss-kpi-card > strong {
+    font-size: 22px;
+  }
+
+  .boss-kpi-card > small {
+    font-size: 9px;
+    white-space: normal;
+  }
+
+  .boss-chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .boss-nct-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .boss-nct-list button {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 10px;
+  }
+
+  .boss-nct-status,
+  .boss-nct-vehicle {
+    grid-column: 1;
+  }
+
+  .boss-nct-expiry {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .boss-analytics-heading,
+  .boss-section-title {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .boss-range-switch {
+    align-self: stretch;
+  }
+
+  .boss-range-switch button {
+    flex: 1;
+  }
+
+  .boss-chart-card {
+    padding: 10px;
+  }
+
+  .boss-chart-heading > strong {
+    font-size: 12px;
+  }
+
+  .boss-comparison-title {
+    align-items: start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .boss-comparison-columns,
+  .boss-personal-content {
+    grid-template-columns: 1fr;
+    gap: 17px;
+  }
+
+  .boss-personal-heading-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .boss-personal-form {
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .boss-fleet-toolbar {
+    align-items: stretch;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 10px;
+  }
+
+  .boss-fleet-search {
+    grid-column: 1 / -1;
+  }
+
+  .boss-search {
+    flex-basis: 100%;
+  }
+
+  .boss-filter {
+    flex: 1 1 120px;
+  }
+
+  .boss-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    padding: 10px;
+  }
+
+  .boss-employee-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .boss-employee-detail {
+    padding: 13px;
+  }
+
+  .boss-employee-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .boss-employee-history-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .boss-employee-date-filter {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .boss-employee-date-inputs label {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .boss-employee-date-inputs input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .boss-employee-range-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .boss-footer {
+    align-items: start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .boss-back-button {
+    max-width: 72px;
+    overflow: hidden;
+    padding: 7px 6px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boss-personal-car,
+  .boss-personal-car-wheel,
+  .boss-personal-road-mark {
+    animation: none;
+  }
+
+  .boss-spinner {
+    animation-duration: 2s;
+  }
+
+  .boss-content-summary,
+  .boss-content-fuel {
+    animation: none;
+  }
+}

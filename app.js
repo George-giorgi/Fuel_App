@@ -1,4 +1,3 @@
-const STORAGE_KEY = 'diesel-desk-records';
 const loginScreen = document.getElementById('loginScreen');
 const appScreen = document.getElementById('appScreen');
 const fuelForm = document.getElementById('fuelForm');
@@ -12,7 +11,7 @@ const tankLevel = document.getElementById('tankLevel');
 const fillPercent = document.getElementById('fillPercent');
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 
-let records = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let records = [];
 
 function showToast(message) {
   toast.textContent = message;
@@ -24,8 +23,43 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-function saveRecords() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+function formatMiles(miles) {
+  return miles.toLocaleString('en-IE', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  });
+}
+
+async function apiRequest(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...options.headers
+    }
+  });
+  const responseText = await response.text();
+  let result;
+  try {
+    result = responseText ? JSON.parse(responseText) : null;
+  } catch (error) {
+    if (response.ok) throw error;
+    throw new Error(`Request failed (${response.status})`);
+  }
+  if (!response.ok) {
+    throw new Error(result?.detail || `Request failed (${response.status})`);
+  }
+  return result;
+}
+
+async function loadRecords() {
+  try {
+    records = await apiRequest('/api/fuel-records');
+    renderHistory();
+  } catch (error) {
+    showToast(`Could not load fuel records: ${error.message}`);
+  }
 }
 
 function renderHistory() {
@@ -45,7 +79,10 @@ function escapeHtml(value) {
 }
 
 function downloadReport(record) {
-  const blob = new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({
+    ...record,
+    mileageUnit: 'mi'
+  }, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = `fuel-report-${record.regNumber.replace(/\s+/g, '-')}-${record.id}.json`;
@@ -60,7 +97,7 @@ function emailReport(record) {
     `Registration: ${record.regNumber}`,
     `Driver: ${record.firstName} ${record.surname}`,
     `Fuel type: ${record.fuelType}`,
-    `Mileage: ${record.mileage} km`,
+    `Mileage: ${formatMiles(record.mileageMiles)} mi`,
     `Tank capacity: ${record.capacity} litres`,
     `Litres added: ${record.litres} litres`,
     `Cost: ${record.cost ? record.cost : 'Not supplied'}`,
@@ -83,31 +120,7 @@ document.getElementById('logoutButton').addEventListener('click', () => {
 
 fuelForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  const data = new FormData(fuelForm);
-  const record = {
-    id: Date.now(),
-    regNumber: data.get('regNumber').trim().toUpperCase(),
-    fuelType: data.get('fuelType'),
-    firstName: data.get('firstName').trim(),
-    surname: data.get('surname').trim(),
-    mileage: Number(data.get('mileage')),
-    capacity: Number(data.get('capacity')),
-    litres: Number(data.get('litres')),
-    cost: Number(data.get('cost')) || 0,
-    createdAt: new Date().toISOString()
-  };
-  records.unshift(record);
-  saveRecords();
-  renderHistory();
-  animationStage.classList.add('filling');
-  const percentage = Math.min(100, Math.round((record.litres / record.capacity) * 100));
-  tankLevel.style.height = `${Math.max(12, percentage)}%`;
-  fillPercent.textContent = `${percentage}%`;
-  animationMessage.textContent = `Filling ${record.regNumber} - report captured`;
-  downloadReport(record);
-  showToast('Report saved. Opening email draft...');
-  window.setTimeout(() => emailReport(record), 700);
-  fuelForm.reset();
+  showToast('Fuel submissions are disabled until meter verification is ready.');
 });
 
 document.getElementById('exportButton').addEventListener('click', () => {
@@ -129,4 +142,4 @@ historyList.addEventListener('click', (event) => {
   if (id) downloadReport(records.find((record) => record.id === id));
 });
 
-renderHistory();
+loadRecords();

@@ -1,0 +1,353 @@
+# Diesel Desk
+
+Diesel Desk is being migrated in phases to a React/Vite frontend and a
+FastAPI-backed local database. The legacy HTML/CSS/JavaScript files remain in
+the repository while the replacement is verified.
+
+## Run the development app
+
+These commands use a Bash-compatible shell (macOS/Linux). Do not commit the
+local `.env` file, SQLite database, or uploaded files.
+
+Start the FastAPI backend in one terminal:
+
+```bash
+cd Fuel_App
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+Edit `.env`: set a fresh `FUEL_AUTH_SECRET` (at least 32 characters), your
+initial administrator email and name. Generate a secret with:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+Load the local values and initialize the database and first administrator:
+
+```bash
+set -a
+. ./.env
+set +a
+python -m alembic upgrade head
+python -m backend.app.cli bootstrap-admin
+python -m uvicorn main:app --reload
+```
+
+The administrator command prompts for a password. It is only needed once for a
+new local database. For local photo OCR with Tesseract, install the Tesseract
+system application as described in Phase 7 below.
+
+In a second terminal, from the project root, install and start the React/Vite
+frontend:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the URL printed by Vite (normally [http://localhost:5173](http://localhost:5173)).
+Vite proxies API and logo requests to FastAPI on port 8000. FastAPI's API
+documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+
+## Phase 2 status
+
+- The React/Vite interface preserves the existing layout, responsive styling,
+  history, JSON exports, email drafts, and company logo assets. The original
+  stylesheet remains in place while a copy is used by the React app.
+- No production Supabase configuration is present in this project; none has
+  been added or changed.
+
+## Phase 3 status
+
+- SQLAlchemy persistence is separated into backend models, schemas,
+  repositories, services, and API routers.
+- Alembic owns the schema at `data/diesel-desk-dev.sqlite`; run
+  `python -m alembic upgrade head` before starting FastAPI.
+- SQLite connections enable foreign-key enforcement. Demo rows are created only
+  by the explicit local seed command. Fuel submissions remain gated on verified
+  meter readings and the vehicle/odometer checks below.
+
+## Phase 4 status
+
+- Employee login uses Argon2 password hashes and a short-lived HttpOnly,
+  SameSite=Strict cookie. Set `FUEL_AUTH_SECRET` to a random secret of at least
+  32 characters before starting FastAPI. Set `FUEL_COOKIE_SECURE=true` when
+  serving over HTTPS.
+- Login accepts either the employee username or email. Random session tokens
+  expire after 30 minutes; only their SHA-256 hashes are stored, and logout
+  revokes the session. Login is limited to five attempts per client in 15
+  minutes.
+- Bootstrap the first administrator once with `FUEL_ADMIN_EMAIL` and
+  `FUEL_ADMIN_NAME` set; the CLI prompts for the password without echoing it.
+  The admin can then create employee accounts and add registered vehicles.
+- A registered vehicle can be assigned to multiple employees from the Registry.
+  The assignment list displays how many employees share each vehicle.
+- The Registry supports Diesel, AdBlue, and Petrol fuel types when registering a
+  vehicle or creating an employee with a new vehicle. Fuel type and tank capacity
+  must be configured before that vehicle can record a fill.
+- Authenticated employees can look up vehicles by registration. The registries
+  start empty; sample identities and vehicles are created only when the explicit
+  local demo seed command is run.
+- Fuel-record reads now require authentication. Fuel-record submissions remain
+  available only after verified meter-photo readings and server-side ownership
+  checks. Reads return only the authenticated employee's records.
+
+## Phase 5 status
+
+- Authenticated `GET /api/dashboard` and `GET /api/inventory` endpoints expose
+  only an explicit "source not configured" status. The inventory response has
+  an empty item list; no metrics or stock figures are fabricated.
+- The React dashboard and inventory views display the same no-data state.
+- No inventory schema, inventory rows, or stock updates were added. A verified
+  local source is required before implementing real inventory figures.
+
+## Phase 6 status
+
+- Admins can issue or rotate an opaque vehicle QR token. Only its SHA-256 hash
+  is stored in SQLite; the QR payload is shown once in the admin UI. Rotation
+  invalidates the previously printed code.
+- The employee photo flow creates a one-use session bound to the authenticated
+  employee and a vehicle assigned to them. Vehicles may be shared by multiple
+  employees. Sessions expire after 10 minutes; the
+  QR-session API remains available for QR-based clients.
+- Meter-photo uploads accept verified JPEG/PNG images up to 10 MB. Files are
+  written with private local permissions under `uploads/meter-photos/`; the
+  directory is not mounted or served as static content. SQLite stores only
+  photo metadata and a private storage key.
+
+## Phase 7: PIUSI meter readings
+
+- After login, the employee and assigned vehicle details are retrieved from
+  their existing SQLite rows. The vehicle response includes its most recently
+  recorded odometer. Employee and vehicle IDs are taken from the authenticated
+  session and database relationship, never from transaction form fields.
+- A private photo of a handwritten reading sheet is required. Write the current
+  fill on the first line and the cumulative total on the second line, using large,
+  clear digits and a thick dark marker (not pencil). Labels are not required.
+  Frame the readings close-up so they fill most of the image. Employees review
+  the extracted values and confirm they match the sheet; they cannot type or
+  change readings. Missing, low-confidence, or unavailable OCR blocks verification
+  and transaction submission.
+- Local Tesseract OCR is the default. To use Google Cloud Vision's handwriting
+  capable `DOCUMENT_TEXT_DETECTION`, set these variables in the backend
+  environment and restart FastAPI:
+
+  ```bash
+  export FUEL_OCR_PROVIDER=google_vision
+  export GOOGLE_CLOUD_VISION_API_KEY="your restricted API key"
+  ```
+
+  Keep the key out of source control and the frontend; restrict it to the Vision
+  API and your backend's use. In this mode, meter photos are sent from FastAPI to
+  Google for OCR. Google lists the first 1,000 Vision text/document-text
+  detection units per month as free; review the [current pricing](https://cloud.google.com/vision/pricing),
+  enable quota/billing alerts, and get approval before sending company photos.
+  Without `FUEL_OCR_PROVIDER=google_vision`, OCR remains local and uses Tesseract.
+- Install Tesseract only when using the local provider (for macOS, use
+  `brew install tesseract` or `sudo port install tesseract tesseract-eng`).
+  Install Python dependencies with `python -m pip install -r requirements.txt`.
+  If the backend does not inherit the MacPorts path, set
+  `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
+  are also detected automatically.
+- `current_fill_litres` is the transaction quantity. The app compares
+  `cumulative_total_litres` with the previous accepted reading from the shared
+  PIUSI meter, across all employees and vehicles. The app does not add the
+  current fill to the previous total. `FUEL_METER_TOLERANCE_LITRES` configures
+  the accepted difference in litres and defaults to `0.10`.
+- A cumulative decrease blocks submission until management records a global
+  meter reset or replacement and its new baseline. Other
+  cumulative/current-fill mismatches are saved with a visible discrepancy
+  status for review.
+- Employees enter the current vehicle odometer in miles (to one decimal place)
+  in the transaction form. Readings are stored and sent through the API in
+  miles. Existing kilometre readings are converted to the nearest tenth of a
+  mile by the odometer-units migration. A reading below
+  the vehicle's latest recorded odometer is blocked unless an administrator
+  authorizes that exact lower value for one-time use, with a reason. The
+  authorization is tied to the vehicle, previous reading, employee, and
+  resulting transaction.
+- The additive Alembic migration preserves existing records. It backfills the
+  new current-fill field from transaction quantity and cumulative totals only
+  from the explicitly named legacy cumulative field; ambiguous legacy
+  `current_fuel_reading` values are not copied.
+- Employee and assigned-vehicle histories remain scoped to the authenticated
+  employee. All new submission and meter-photo verification endpoints enforce
+  photo, vehicle, and employee ownership server-side.
+
+## Phase 8: global cumulative meter
+
+- The additive `0010_global_cumulative_meter` migration creates a singleton
+  global meter state and an auditable reset/replacement event table. Existing
+  fuel records are retained and used to initialize the state from the latest
+  chronological non-negative finite cumulative reading. When timestamps are
+  tied, the highest reading is used. No local database snapshot or reading is
+  required in the repository.
+- Each saved fill updates the global state from the verified photo's
+  cumulative-total reading in the same SQLite transaction as the fuel record.
+  The state retains the previous total and the latest employee, vehicle, time,
+  and transaction/photo references. Duplicate photos cannot update it twice;
+  concurrent updates use a revision check and are rejected for review if stale.
+- The Global Cumulative Total card and cross-employee history are available
+  only to Admin and Boss accounts. FastAPI returns HTTP 403 to employees on
+  global meter state, history, reset/replacement, and photo endpoints.
+- Demo-employee submissions are marked as demo/test records in SQLite and in
+  management history. They update only the local SQLite database; this
+  application has no production Supabase connection.
+
+## Phase 9: Boss workspace and fleet summary
+
+- Boss accounts open the responsive Fleet Intelligence dashboard after sign-in.
+  It includes fleet metrics, analytics, vehicle search, activity, and NCT status.
+  Executive data endpoints require the `admin` or `boss` role and return HTTP
+  403 to employees.
+- Admins can update an employee or Boss account's role from **Employees**.
+  They can also deactivate or reactivate those accounts. Deactivation revokes
+  active sessions and blocks sign-in while preserving fuel and audit history;
+  Admin accounts cannot be changed with these controls.
+- Boss and Admin executive dashboard summaries, charts, vehicle search,
+  activity, and NCT status include seeded demo rows and vehicles so the sample
+  fleet is visible. Both views exclude vehicles classified as personal. Fuel
+  costs are shown in EUR only when recorded; missing prices are reported rather
+  than estimated. Demo records remain marked **DEMO / TEST**; a cumulative
+  meter value linked to a demo transaction is sample data, not a verified live
+  reading.
+- The executive dashboard includes a searchable employee directory with
+  assigned company vehicles, activity summaries, and paginated fuel histories
+  for each employee. Fuel histories default to the last five years and support
+  quick date presets or custom inclusive start/end dates. Bosses can review
+  seeded demo employees and records.
+- Boss accounts can use the separate **New fill** dashboard tab to record fuel
+  for their Admin-assigned vehicle. It reuses the employee photo-verification
+  and mileage workflow; fuel entry remains unavailable until a vehicle is
+  assigned and the meter readings are verified. Admin executive view remains
+  focused on fleet management.
+- Migration `0013_company_personal_vehicles` classifies existing vehicles as
+  company vehicles by default. Admins can mark a newly registered vehicle as
+  personal in either Registry form. Bosses can also assign an unclaimed
+  personal vehicle to themselves; this assignment is kept separate from
+  company fleet totals.
+- Notifications are derived from current NCT, meter-review, and cost-completeness
+  data. Read state is stored in the signed-in browser; no separate notification
+  records or fabricated activity are created.
+- No Boss account or production data is created by this feature. Apply local
+  migrations with `python -m alembic upgrade head` before starting the backend.
+
+## Testing the demo employee workflow
+
+1. Apply local migrations and start the backend/frontend using the commands
+   above. Do not run the seed command again just to log in; the existing local
+   demo users and vehicles are reused.
+2. Log in using `Tommy1` and password `123456`. The account page should show
+   Tommy1's database identity, `DD-TOMMY-001`, its stored vehicle details, and the
+   latest odometer reading.
+3. Repeat with `Tommy2` through `Tommy10`; registrations run from
+   `DD-TOMMY-002` through `DD-TOMMY-010`. Each account sees only its own history
+   and assigned vehicle. These shared demo credentials are for local testing.
+4. On an authorized tablet, write the readings on plain white paper in dark
+   block digits, one per line. Labels are not required:
+
+   ```text
+   [current fill in litres]
+   [cumulative total in litres]
+   ```
+
+   Select **Open camera**, allow camera access, take a clear photo, check the
+   preview, and select **Upload photo and run OCR**. Confirm only when both
+   extracted readings match the paper, then enter the current odometer. Browser
+   camera access requires HTTPS (localhost is exempt). If OCR is uncertain,
+   retake the photo; manual readings are not accepted. When using the local
+   provider, install Tesseract if the executable is missing.
+5. If an odometer decreases, an administrator must authorize the exact
+   corrected odometer from the local registry panel before the employee retries.
+6. Log in as the configured Admin (or a Boss account) to view **Global meter**. It shows
+   the latest reading, previous reading and difference, update time, employee,
+   vehicle, meter photo when available, and shared history. Tommy1 through Tommy10
+   do not have access to this management-only view or its API endpoints.
+7. Keep demo testing isolated: do not upload private company meter photos or use
+   live meter readings with demo accounts. New demo-account fills are marked
+   **DEMO / TEST** in management history and affect that local database's meter
+   baseline.
+
+## Admin dashboard
+
+- Admin accounts open on **Summary** and have **Employees**, **Registry**, and
+  **NCT Expiry** for management tasks. Employee
+  accounts handle assigned vehicles and fuel entries; the Admin account does
+  not have a personal **My vehicle** tab. Employees lets an admin select any
+  account and view its fuel history and meter photos.
+- Summary starts with the current calendar month and supports any start/end
+  date range or all available dates. It shows fill count, recorded litres,
+  recorded fuel cost, and the most-filled vehicles. The app does not infer a
+  currency; it displays the stored cost values as entered.
+- Employee listing, employee fuel-history, and fleet-summary APIs require the
+  Admin role in FastAPI. Employees and Boss accounts cannot use these endpoints.
+
+## NCT expiry monitoring
+
+- Migration `0011_vehicle_nct_expiry` adds a nullable SQLite date to each
+  vehicle. Existing vehicle details are preserved; an unset date is shown as
+  **NCT date not set**.
+- Migration `0012_shared_vehicles` preserves existing assignments in an
+  employee-to-vehicle association table and allows multiple employees to share
+  one vehicle. NCT monitoring still lists each vehicle once and displays all
+  assigned employee names.
+- The Admin dashboard's **NCT Expiry Alerts** card summarizes vehicles due in
+  30 days or less and expired vehicles. **NCT Expiry Monitoring** lists every
+  vehicle and lets management update or clear its date. Dates are displayed in
+  Irish `DD/MM/YYYY` format.
+- The NCT tab highlights the seven vehicle expiry dates closest to today and
+  provides fleet search by registration, make, model, assigned employees, or
+  status. Selecting a highlighted vehicle filters the full editable list to it.
+  Expiry dates display and can be entered in `DD/MM/YYYY` format without a
+  calendar. Select **Save** to submit a valid date change.
+- Alert status is calculated from the current `Europe/Dublin` date whenever
+  the API is requested: over 30 days is no alert; day 30 is Upcoming; days
+  1–29 are Urgent; day 0 expires today; earlier dates are Expired. The UI
+  refreshes while the monitoring view is open, and alerts are derived rather
+  than stored, so refreshes do not create duplicate alert records.
+- `GET /api/admin/nct-alerts`, `GET /api/admin/vehicles/nct`, and
+  `PATCH /api/admin/vehicles/{vehicle_id}/nct` are protected by the FastAPI
+  management-role dependency. Admin and future Boss roles are allowed;
+  employees receive HTTP 403. No Boss account is created by this feature.
+- The local demo seed assigns relative NCT dates to Tommy1 through Tommy10
+  (7, 15, 28, 60, 75, 90, 120, 150, 180, and 200 days from seed time). The
+  operation is idempotent and only touches marked demo accounts and vehicles.
+  Running the seed command also upserts the existing demo fuel records.
+
+## Local demo accounts
+
+After upgrading the local database, seed clearly marked demo employees, assigned
+vehicles, and fuel history with:
+
+```bash
+python -m alembic upgrade head
+python -m backend.app.cli seed-demo-data
+```
+
+The seed is repeatable and does not delete or overwrite non-demo employees,
+vehicles, or fuel records. It creates 10 demo accounts (`Tommy1` through
+`Tommy10`), one demo vehicle per account, and three synthetic fuel records per
+account. Demo passwords are Argon2-hashed in SQLite.
+
+To replace an older local demo cohort and its test activity, run this one-time
+command instead of `seed-demo-data`:
+
+```bash
+python -m backend.app.cli reset-demo-data
+```
+
+It replaces only the known demo cohort and its test fuel/photo/meter data.
+Admin, Boss, non-demo employees, vehicles, and fuel records are preserved.
+The Tommy records are fictional and marked **DEMO / TEST**. Both Admin and
+Boss executive dashboards include these records in their totals.
+
+Use Tommy1 through Tommy10 as the demo usernames and `123456` as their shared
+password. These
+credentials and generated records are for local testing only; do not use them
+outside local development. Fuel history is returned only for the authenticated
+employee, and the session cookie is revoked on logout.
