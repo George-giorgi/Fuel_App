@@ -20,11 +20,19 @@ function showToast(message) {
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown date';
+  }
+  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
 }
 
 function formatMiles(miles) {
-  return miles.toLocaleString('en-IE', {
+  const safeMiles = Number(miles);
+  if (!Number.isFinite(safeMiles)) {
+    return '0.0';
+  }
+  return safeMiles.toLocaleString('en-IE', {
     minimumFractionDigits: 1,
     maximumFractionDigits: 1
   });
@@ -55,37 +63,45 @@ async function apiRequest(path, options = {}) {
 
 async function loadRecords() {
   try {
-    records = await apiRequest('/api/fuel-records');
+    const response = await apiRequest('/api/fuel-records');
+    records = Array.isArray(response) ? response : [];
     renderHistory();
   } catch (error) {
+    records = [];
+    renderHistory();
     showToast(`Could not load fuel records: ${error.message}`);
   }
 }
 
 function renderHistory() {
-  emptyState.classList.toggle('hidden', records.length > 0);
-  historyList.innerHTML = records.map((record) => `
+  const safeRecords = Array.isArray(records) ? records : [];
+  emptyState.classList.toggle('hidden', safeRecords.length > 0);
+  historyList.innerHTML = safeRecords.map((record) => `
     <article class="history-item">
-      <div><strong>${escapeHtml(record.regNumber)}</strong><small>${escapeHtml(record.firstName)} ${escapeHtml(record.surname)} / ${formatDate(record.createdAt)}</small></div>
-      <div class="litres">${record.litres} L</div>
-      <button type="button" data-download="${record.id}">Download report .json</button>
+      <div><strong>${escapeHtml(record?.regNumber ?? 'Unknown vehicle')}</strong><small>${escapeHtml(record?.firstName ?? 'Unknown')} ${escapeHtml(record?.surname ?? 'driver')} / ${formatDate(record?.createdAt)}</small></div>
+      <div class="litres">${Number(record?.litres ?? 0)} L</div>
+      <button type="button" data-download="${record?.id ?? ''}">Download report .json</button>
     </article>
   `).join('');
-  recordCount.textContent = `${records.length} record${records.length === 1 ? '' : 's'}`;
+  recordCount.textContent = `${safeRecords.length} record${safeRecords.length === 1 ? '' : 's'}`;
 }
 
 function escapeHtml(value) {
-  return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
 }
 
 function downloadReport(record) {
+  if (!record) {
+    return;
+  }
   const blob = new Blob([JSON.stringify({
     ...record,
     mileageUnit: 'mi'
   }, null, 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `fuel-report-${record.regNumber.replace(/\s+/g, '-')}-${record.id}.json`;
+  const regNumber = String(record.regNumber ?? 'unknown').trim() || 'unknown';
+  link.download = `fuel-report-${regNumber.replace(/\s+/g, '-')}-${record.id ?? 'report'}.json`;
   link.click();
   URL.revokeObjectURL(link.href);
 }
@@ -138,8 +154,20 @@ document.getElementById('exportButton').addEventListener('click', () => {
 });
 
 historyList.addEventListener('click', (event) => {
-  const id = Number(event.target.dataset.download);
-  if (id) downloadReport(records.find((record) => record.id === id));
+  const button = event.target.closest('[data-download]');
+  if (!button) {
+    return;
+  }
+
+  const id = button.dataset.download;
+  if (!id) {
+    return;
+  }
+
+  const record = records.find((candidate) => String(candidate.id) === String(id));
+  if (record) {
+    downloadReport(record);
+  }
 });
 
 loadRecords();

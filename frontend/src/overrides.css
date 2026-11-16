@@ -4965,10 +4965,21 @@ footer {
 }
 
 @media (max-width: 700px) {
+  .admin-app-shell .sidebar nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
   .admin-sidebar-tabs {
     display: flex;
     width: max-content;
     min-width: 100%;
+  }
+
+  .admin-app-shell .sidebar nav .admin-sidebar-tabs {
+    flex: 0 0 auto;
   }
 
   .sidebar nav .admin-sidebar-tabs button {
@@ -5023,6 +5034,30 @@ footer {
   .history-actions {
     flex-direction: column;
     gap: 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-app-shell .sidebar nav {
+    display: block;
+    overflow: visible;
+  }
+
+  .admin-app-shell .sidebar nav .admin-sidebar-tabs {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sidebar nav .admin-sidebar-tabs button {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .sidebar nav .admin-sidebar-tabs button.active::before {
+    bottom: 4px;
   }
 }
 
