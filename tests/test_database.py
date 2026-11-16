@@ -2130,6 +2130,31 @@ class DatabaseTests(unittest.TestCase):
                 )
             )
 
+    def test_long_ocr_message_is_limited_to_database_column_length(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            employee = create_employee(
+                session,
+                "long-ocr-message@example.test",
+                "OCR Message Worker",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "lm12 reg")
+            employee.vehicles.append(vehicle)
+            photo = self._create_verified_meter_photo(
+                session,
+                employee,
+                vehicle,
+                7.5,
+                107.5,
+                ocr_result=MeterOcrResult(
+                    status="uncertain",
+                    message="ocr warning; " * 40,
+                ),
+                verify=False,
+            )
+
+            self.assertEqual(len(photo.ocr_message), 255)
+
     def test_odometer_decrease_requires_single_use_admin_correction(self) -> None:
         with Session(self.engine) as session, session.begin():
             seed_demo_data(session)

@@ -37,6 +37,7 @@ from backend.app.services.photo_storage import store_photo
 QR_SESSION_MINUTES = 10
 MAX_METER_PHOTO_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
+MAX_METER_OCR_MESSAGE_LENGTH = 255
 PHOTO_TYPES = {
     "image/jpeg": ("JPEG", ".jpg"),
     "image/png": ("PNG", ".png"),
@@ -246,7 +247,11 @@ def store_meter_photo(
     meter_photo.ocr_cumulative_total_confidence = (
         ocr_result.cumulative_total_confidence
     )
-    meter_photo.ocr_message = ocr_result.message
+    meter_photo.ocr_message = (
+        ocr_result.message[:MAX_METER_OCR_MESSAGE_LENGTH]
+        if ocr_result.message is not None
+        else None
+    )
     meter_photo.ocr_provider = ocr_result.provider
     meter_photo.ocr_current_fill_raw_digits = (
         ocr_result.current_fill_raw_digits
