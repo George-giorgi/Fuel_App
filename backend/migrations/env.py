@@ -3,7 +3,8 @@ from logging.config import fileConfig
 from alembic import context
 
 from backend.app.db.base import Base
-from backend.app.db.session import engine
+from backend.app.core.config import get_migration_database_url
+from backend.app.db.session import create_database_engine
 from backend.app import models  # noqa: F401
 
 
@@ -12,6 +13,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
+engine = create_database_engine(get_migration_database_url())
 
 
 def run_migrations_offline() -> None:

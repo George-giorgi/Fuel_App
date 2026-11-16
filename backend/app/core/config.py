@@ -16,8 +16,7 @@ SESSION_COOKIE_SAMESITE = os.environ.get("FUEL_COOKIE_SAMESITE", "strict").lower
 METER_OCR_MIN_CONFIDENCE = 60.0
 
 
-def get_database_url() -> URL:
-    configured_url = os.environ.get("DATABASE_URL", "").strip()
+def _parse_database_url(configured_url: str) -> URL:
     if not configured_url:
         return URL.create("sqlite", database=str(DATABASE_PATH))
 
@@ -25,6 +24,17 @@ def get_database_url() -> URL:
     if url.drivername in {"postgres", "postgresql"}:
         url = url.set(drivername="postgresql+psycopg")
     return url
+
+
+def get_database_url() -> URL:
+    return _parse_database_url(os.environ.get("DATABASE_URL", "").strip())
+
+
+def get_migration_database_url() -> URL:
+    configured_url = os.environ.get("DATABASE_URL_UNPOOLED", "").strip()
+    if not configured_url:
+        return get_database_url()
+    return _parse_database_url(configured_url)
 
 
 def get_cors_origins() -> list[str]:

@@ -41,7 +41,11 @@ from backend.app.api.routers.vehicles import (
     my_vehicle,
     my_vehicle_fuel_records,
 )
-from backend.app.core.config import SESSION_COOKIE_NAME
+from backend.app.core.config import (
+    SESSION_COOKIE_NAME,
+    get_database_url,
+    get_migration_database_url,
+)
 from backend.app.core.rate_limit import LoginRateLimiter, login_rate_limiter
 from backend.app.core.security import (
     create_access_token,
@@ -242,6 +246,29 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(engine.url.drivername, "postgresql+psycopg")
         finally:
             engine.dispose()
+
+    def test_migrations_prefer_the_unpooled_database_url(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_URL": "postgresql://pooled.example/app",
+                "DATABASE_URL_UNPOOLED": "postgresql://direct.example/app",
+            },
+        ):
+            self.assertEqual(get_database_url().host, "pooled.example")
+            migration_url = get_migration_database_url()
+            self.assertEqual(migration_url.drivername, "postgresql+psycopg")
+            self.assertEqual(migration_url.host, "direct.example")
+
+    def test_migrations_fall_back_to_the_database_url(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"DATABASE_URL": "postgresql://pooled.example/app"},
+        ):
+            with patch.dict(os.environ, {"DATABASE_URL_UNPOOLED": ""}):
+                self.assertEqual(
+                    get_migration_database_url().host, "pooled.example"
+                )
 
     def test_empty_registry_does_not_authenticate_or_identify(self) -> None:
         with Session(self.engine) as session:

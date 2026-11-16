@@ -37,6 +37,21 @@ python -m backend.app.cli bootstrap-admin
 python -m uvicorn main:app --reload
 ```
 
+For an explicit local run against Neon instead of SQLite, load the local
+settings first and then let Neon's values override the database URLs:
+
+```bash
+set -a
+. ./.env
+. ./.env.local
+set +a
+python -m alembic upgrade head
+python -m uvicorn main:app --reload
+```
+
+The app uses pooled `DATABASE_URL`; Alembic uses `DATABASE_URL_UNPOOLED` when
+available. Leave `.env.local` unloaded for normal SQLite development.
+
 The administrator command prompts for a password. It is only needed once for a
 new local database. For local photo OCR with Tesseract, install the Tesseract
 system application as described in Phase 7 below.
@@ -83,8 +98,13 @@ imported. The Render start command applies schema-only Alembic upgrades.
   slash. Do not use a wildcard or a preview URL for production.
 - **Database:** create a Neon PostgreSQL database and set Render's
   `DATABASE_URL` to Neon's pooled PostgreSQL connection string with SSL
-  enabled. SQLAlchemy converts PostgreSQL URLs to the installed psycopg driver.
-  Local development continues to default to SQLite.
+  enabled. Set `DATABASE_URL_UNPOOLED` to Neon's direct connection string for
+  Alembic migrations; the backend selects it only for migrations and keeps the
+  pooled URL for application requests. SQLAlchemy converts PostgreSQL URLs to
+  the installed psycopg driver. Local development continues to default to
+  SQLite. To opt into Neon locally, load the variables generated in `.env.local`
+  into the shell before starting the backend; do not source that file for
+  routine SQLite development.
 - **Photo storage:** create a private Cloudflare R2 Standard bucket, keep
   public access disabled, and create an R2 token scoped to that bucket. Set
   Render's `FUEL_PHOTO_STORAGE=r2`, `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`,
@@ -115,17 +135,17 @@ imported. The Render start command applies schema-only Alembic upgrades.
    build settings above. Set `API_ORIGIN` to the HTTPS Render service origin
    after that service exists. The Pages URL is the exact origin to enter in
    Render's `FUEL_CORS_ORIGINS`.
-3. In Neon, create a PostgreSQL project/database, copy its pooled connection
-   string, and keep it available for Render's `DATABASE_URL` and the one-time
-   trusted-shell admin bootstrap. Do not point local SQLite commands at this
-   URL.
+3. In Neon, create a PostgreSQL project/database and copy both its pooled and
+   direct connection strings. Use the pooled URL for Render's `DATABASE_URL`
+   and the direct URL for `DATABASE_URL_UNPOOLED`; keep both backend-only. Do not
+   point local SQLite commands at these URLs.
 4. In Cloudflare R2, create a private Standard bucket and a scoped S3 API
    token. Copy the account ID, bucket name, access key, and secret key to the
    matching Render environment variables. Do not enable public bucket access.
 5. In Render, create the Web Service from the pushed branch using
-   `render.yaml`. Set `DATABASE_URL`, the exact Pages `FUEL_CORS_ORIGINS`, and
-   all R2 variables. Confirm the generated `FUEL_AUTH_SECRET` is present and
-   the deploy health check passes at `/healthz`.
+   `render.yaml`. Set both database URLs, the exact Pages `FUEL_CORS_ORIGINS`,
+   and all R2 variables. Confirm the generated `FUEL_AUTH_SECRET` is present
+   and the deploy health check passes at `/healthz`.
 6. From a trusted local terminal, set the production Neon URL,
    `FUEL_ADMIN_EMAIL`, and `FUEL_ADMIN_NAME` for one command, then run
    `python -m backend.app.cli bootstrap-admin`. The command prompts for a new
