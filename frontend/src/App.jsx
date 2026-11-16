@@ -1831,7 +1831,11 @@ function RegistryDropdown({
       if (!dropdownRef.current?.contains(event.target)) setOpen(false);
     }
     document.addEventListener('pointerdown', dismissDropdown);
-    return () => document.removeEventListener('pointerdown', dismissDropdown);
+    document.addEventListener('focusin', dismissDropdown);
+    return () => {
+      document.removeEventListener('pointerdown', dismissDropdown);
+      document.removeEventListener('focusin', dismissDropdown);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -1896,9 +1900,6 @@ function RegistryDropdown({
       <div
         className={`admin-registry-dropdown${open ? ' is-open' : ''}${error ? ' has-error' : ''}`}
         ref={dropdownRef}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-        }}
       >
         <button
           id={`${id}Trigger`}

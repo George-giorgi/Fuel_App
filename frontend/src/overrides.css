@@ -3516,6 +3516,7 @@ footer {
 .global-meter-photo {
   display: flex;
   min-width: 0;
+  align-self: start;
   flex-direction: column;
   gap: 8px;
   margin: 0;
@@ -3524,8 +3525,9 @@ footer {
 .global-meter-photo > a,
 .global-meter-photo-empty {
   display: grid;
-  min-height: 145px;
-  flex: 1;
+  height: 180px;
+  min-height: 0;
+  flex: 0 0 180px;
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -3534,10 +3536,11 @@ footer {
 }
 
 .global-meter-photo img {
+  display: block;
   width: 100%;
   height: 100%;
-  min-height: 145px;
-  object-fit: cover;
+  min-height: 0;
+  object-fit: contain;
 }
 
 .global-meter-photo-empty {
@@ -3930,7 +3933,8 @@ footer {
 
   .global-meter-photo > a,
   .global-meter-photo-empty {
-    min-height: 190px;
+    height: 180px;
+    flex-basis: 180px;
   }
 
   .global-meter-event-form {
@@ -5986,9 +5990,15 @@ footer {
 }
 
 .admin-summary-tab .global-meter-photo > a,
-.admin-summary-tab .global-meter-photo-empty,
+.admin-summary-tab .global-meter-photo-empty {
+  height: 180px;
+  min-height: 0;
+  flex-basis: 180px;
+}
+
 .admin-summary-tab .global-meter-photo img {
-  min-height: 120px;
+  height: 100%;
+  min-height: 0;
 }
 
 .admin-summary-tab .global-meter-photo-empty {
