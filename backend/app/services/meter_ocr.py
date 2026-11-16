@@ -24,8 +24,10 @@ _TESSERACT_PATHS = (
 _GOOGLE_VISION_ENDPOINT = "https://vision.googleapis.com/v1/images:annotate"
 _GOOGLE_VISION_TIMEOUT_SECONDS = 20
 _GOOGLE_VISION_CROP = (0.08, 0.35, 0.92, 0.78)
+_GOOGLE_VISION_CURRENT_ROW_CROP = (0.18, 0.41, 0.80, 0.56)
 _GOOGLE_VISION_TOTAL_ROW_CROP = (0.18, 0.54, 0.80, 0.70)
 _GOOGLE_VISION_MIN_WIDTH = 1200
+_GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH = 1600
 _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH = 1600
 
 
@@ -65,13 +67,13 @@ def _number_from_token(value: str) -> float | None:
 def _number_from_google_vision_words(
     numeric_words: list[tuple[str, float]],
     *,
-    is_cumulative_total: bool,
+    infer_decimal_from_word_groups: bool,
 ) -> float | None:
     text = "".join(word for word, _ in numeric_words)
     number = _number_from_token(text)
     if (
         number is None
-        or not is_cumulative_total
+        or not infer_decimal_from_word_groups
         or any("." in word or "," in word for word, _ in numeric_words)
     ):
         return number
@@ -84,7 +86,7 @@ def _number_from_google_vision_words(
     if len(digit_groups) < 2:
         return number
 
-    # Vision can replace the PIUSI total's decimal mark with a space.
+    # Vision can replace a PIUSI row's decimal mark with a space.
     inferred_number = _number_from_token(
         f"{digit_groups[0]}.{''.join(digit_groups[1:])}"
     )
@@ -210,26 +212,30 @@ def _prepare_google_vision_image(content: bytes) -> bytes:
     return prepared.getvalue()
 
 
-def _prepare_google_vision_total_row_image(content: bytes) -> bytes:
+def _prepare_google_vision_row_image(
+    content: bytes,
+    crop_bounds: tuple[float, float, float, float],
+    min_width: int,
+) -> bytes:
     with Image.open(BytesIO(content)) as source:
         image = ImageOps.exif_transpose(source).convert("L")
 
     width, height = image.size
     left, top, right, bottom = (
-        round(width * _GOOGLE_VISION_TOTAL_ROW_CROP[0]),
-        round(height * _GOOGLE_VISION_TOTAL_ROW_CROP[1]),
-        round(width * _GOOGLE_VISION_TOTAL_ROW_CROP[2]),
-        round(height * _GOOGLE_VISION_TOTAL_ROW_CROP[3]),
+        round(width * crop_bounds[0]),
+        round(height * crop_bounds[1]),
+        round(width * crop_bounds[2]),
+        round(height * crop_bounds[3]),
     )
     if right <= left or bottom <= top:
-        raise ValueError("The photo is too small to crop the cumulative meter row.")
+        raise ValueError("The photo is too small to crop the meter display row.")
 
     image = ImageOps.autocontrast(image.crop((left, top, right, bottom)), cutoff=1)
     image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
-    if image.width < _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH:
-        scale = _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH / image.width
+    if image.width < min_width:
+        scale = min_width / image.width
         image = image.resize(
-            (_GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH, round(image.height * scale)),
+            (min_width, round(image.height * scale)),
             Image.Resampling.LANCZOS,
         )
 
@@ -241,7 +247,7 @@ def _prepare_google_vision_total_row_image(content: bytes) -> bytes:
 def _google_vision_word_lines(
     document: dict[str, object],
     *,
-    cumulative_row_only: bool = False,
+    infer_decimal_from_word_groups: bool = False,
 ) -> list[tuple[int, str, float]]:
     words = []
     pages = document.get("pages", [])
@@ -345,7 +351,9 @@ def _google_vision_word_lines(
             continue
         number = _number_from_google_vision_words(
             numeric_words,
-            is_cumulative_total=cumulative_row_only or len(readings) == 1,
+            infer_decimal_from_word_groups=(
+                infer_decimal_from_word_groups or len(readings) == 1
+            ),
         )
         if number is None:
             continue
@@ -415,7 +423,16 @@ def _extract_google_vision_readings(
 ) -> MeterOcrResult:
     try:
         display_content = _prepare_google_vision_image(content)
-        total_row_content = _prepare_google_vision_total_row_image(content)
+        current_row_content = _prepare_google_vision_row_image(
+            content,
+            _GOOGLE_VISION_CURRENT_ROW_CROP,
+            _GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH,
+        )
+        total_row_content = _prepare_google_vision_row_image(
+            content,
+            _GOOGLE_VISION_TOTAL_ROW_CROP,
+            _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
+        )
     except (OSError, ValueError, Image.DecompressionBombError):
         return MeterOcrResult(
             status="failed",
@@ -429,6 +446,14 @@ def _extract_google_vision_readings(
                 {
                     "image": {
                         "content": base64.b64encode(display_content).decode("ascii")
+                    },
+                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
+                },
+                {
+                    "image": {
+                        "content": base64.b64encode(current_row_content).decode(
+                            "ascii"
+                        )
                     },
                     "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
                 },
@@ -482,13 +507,14 @@ def _extract_google_vision_readings(
     responses = response_data.get("responses")
     if (
         not isinstance(responses, list)
-        or len(responses) < 2
+        or len(responses) < 3
         or not isinstance(responses[0], dict)
         or not isinstance(responses[1], dict)
+        or not isinstance(responses[2], dict)
     ):
         return MeterOcrResult(
             status="failed",
-            message="Google Vision did not return results for both meter crops.",
+            message="Google Vision did not return results for all meter display crops.",
         )
 
     display_result = _parse_google_vision_response(
@@ -502,7 +528,36 @@ def _extract_google_vision_readings(
     ):
         return display_result
 
-    total_response = responses[1]
+    current_response = responses[1]
+    current_error = current_response.get("error")
+    if isinstance(current_error, dict):
+        message = current_error.get("message", "The OCR request was rejected.")
+        return MeterOcrResult(
+            status="failed",
+            message=f"Google Vision error reading the current-fill row: {message}",
+        )
+    current_document = current_response.get("fullTextAnnotation")
+    if not isinstance(current_document, dict):
+        return MeterOcrResult(
+            status="uncertain",
+            current_fill_litres=display_result.current_fill_litres,
+            current_fill_confidence=display_result.current_fill_confidence,
+            message="Google Vision could not read the current-fill row. Retake the photo.",
+        )
+
+    current_readings = _google_vision_word_lines(
+        current_document,
+        infer_decimal_from_word_groups=True,
+    )
+    if not current_readings:
+        return MeterOcrResult(
+            status="uncertain",
+            current_fill_litres=display_result.current_fill_litres,
+            current_fill_confidence=display_result.current_fill_confidence,
+            message="Google Vision could not read the current-fill row. Retake the photo.",
+        )
+
+    total_response = responses[2]
     api_error = total_response.get("error")
     if isinstance(api_error, dict):
         message = api_error.get("message", "The OCR request was rejected.")
@@ -521,7 +576,7 @@ def _extract_google_vision_readings(
 
     total_readings = _google_vision_word_lines(
         total_document,
-        cumulative_row_only=True,
+        infer_decimal_from_word_groups=True,
     )
     if not total_readings:
         return MeterOcrResult(
@@ -531,15 +586,16 @@ def _extract_google_vision_readings(
             message="Google Vision could not read the PIUSI TOTAL row. Retake the photo.",
         )
 
+    _, current_text, current_confidence = current_readings[0]
     _, total_text, total_confidence = total_readings[0]
     return parse_meter_ocr_data(
         {
             "text": [
-                str(display_result.current_fill_litres),
+                current_text,
                 total_text,
             ],
             "conf": [
-                display_result.current_fill_confidence,
+                current_confidence,
                 total_confidence,
             ],
             "top": [0, 1],

@@ -275,8 +275,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   transaction submission.
 - Production uses Google Cloud Vision `DOCUMENT_TEXT_DETECTION`. Before sending a
   PIUSI photo to Vision, the backend crops and upscales the display, then sends a
-  contrast-enhanced close crop of the smaller TOTAL row as a second OCR pass.
-  Reading lengths remain unrestricted. The Render blueprint sets
+  contrast-enhanced close crop of each digit row to improve decimal and digit
+  recognition. The app preserves up to four decimal places in readings. Reading
+  lengths remain unrestricted. The Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to
   Tesseract; to use Google Vision locally, set:
@@ -287,10 +288,12 @@ imported. The Render start command applies schema-only Alembic upgrades.
   ```
 
   Keep the key out of source control and the frontend; restrict it to the Vision
-  API and your backend's use. In this mode, meter photos are sent from FastAPI to
-  Google for OCR. Google lists the first 1,000 Vision text/document-text
-  detection units per month as free; review the [current pricing](https://cloud.google.com/vision/pricing),
-  enable quota/billing alerts, and get approval before sending company photos.
+  API and your backend's use. In this mode, each meter photo is sent from FastAPI
+  to Google as three OCR images (the full display and two digit-row crops),
+  consuming three text/document-text detection units. Google lists the first
+  1,000 Vision units per month as free; review the
+  [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
+  alerts, and get approval before sending company photos.
   Local development automatically uses Google Vision when
   `GOOGLE_CLOUD_VISION_API_KEY` is configured, unless `FUEL_OCR_PROVIDER` is
   explicitly set to another provider.

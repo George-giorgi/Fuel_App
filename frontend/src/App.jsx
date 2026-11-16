@@ -1308,7 +1308,7 @@ function formatLitres(value) {
   if (value == null) return 'Not recorded';
   return Number(value).toLocaleString('en-GB', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2
+    maximumFractionDigits: 4
   });
 }
 

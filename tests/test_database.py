@@ -1314,10 +1314,16 @@ class DatabaseTests(unittest.TestCase):
                 {
                     "fullTextAnnotation": vision_document(
                         [
-                            vision_word("22", 10, 100, 0.94),
-                            vision_word(".", 30, 100, 0.90),
-                            vision_word("032", 40, 100, 0.92),
+                            vision_word("22032", 10, 100, 0.94),
                             vision_word("26.56", 10, 150, 0.96),
+                        ]
+                    )
+                },
+                {
+                    "fullTextAnnotation": vision_document(
+                        [
+                            vision_word("22", 10, 50, 0.96),
+                            vision_word("032", 40, 50, 0.96),
                         ]
                     )
                 },
@@ -1356,7 +1362,7 @@ class DatabaseTests(unittest.TestCase):
         request_payload = json.loads(request.data)
         self.assertEqual(request.method, "POST")
         self.assertEqual(parse_qs(urlparse(request.full_url).query), {"key": ["test-key"]})
-        self.assertEqual(len(request_payload["requests"]), 2)
+        self.assertEqual(len(request_payload["requests"]), 3)
         self.assertEqual(
             request_payload["requests"][0]["features"],
             [{"type": "DOCUMENT_TEXT_DETECTION"}],
@@ -1370,10 +1376,19 @@ class DatabaseTests(unittest.TestCase):
         )
         self.assertEqual(prepared_image.width, 1200)
         self.assertLess(prepared_image.height, 1024)
-        total_row_image = Image.open(
+        current_row_image = Image.open(
             BytesIO(
                 base64.b64decode(
                     request_payload["requests"][1]["image"]["content"]
+                )
+            )
+        )
+        self.assertEqual(current_row_image.width, 1600)
+        self.assertLess(current_row_image.height, prepared_image.height)
+        total_row_image = Image.open(
+            BytesIO(
+                base64.b64decode(
+                    request_payload["requests"][2]["image"]["content"]
                 )
             )
         )
@@ -1382,7 +1397,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.current_fill_litres, 22.032)
         self.assertEqual(result.cumulative_total_litres, 26.1563)
-        self.assertEqual(result.current_fill_confidence, 93.0)
+        self.assertEqual(result.current_fill_confidence, 96.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
@@ -1404,6 +1419,7 @@ class DatabaseTests(unittest.TestCase):
             {
                 "responses": [
                     {"error": {"message": "API key invalid"}},
+                    {},
                     {},
                 ]
             }
