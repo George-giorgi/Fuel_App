@@ -275,9 +275,12 @@ imported. The Render start command applies schema-only Alembic upgrades.
   transaction submission.
 - Production uses Google Cloud Vision `DOCUMENT_TEXT_DETECTION`. Before sending a
   PIUSI photo to Vision, the backend crops and upscales the display, then sends a
-  contrast-enhanced close crop of each digit row to improve decimal and digit
-  recognition. The app preserves up to four decimal places in readings. Reading
-  lengths remain unrestricted. The Render blueprint sets
+  contrast-enhanced close crop of each digit row to improve digit recognition.
+  Since the PIUSI display uses three decimal places for the current-fill row and
+  four for TOTAL, the backend restores those decimal positions even when OCR
+  misreads or misses the decimal mark. If the close crop misses the current row,
+  OCR can fall back to the full-display reading. Integer digit counts remain
+  unrestricted. The Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to
   Tesseract; to use Google Vision locally, set:

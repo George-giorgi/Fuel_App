@@ -68,14 +68,11 @@ def _number_from_google_vision_words(
     numeric_words: list[tuple[str, float]],
     *,
     infer_decimal_from_word_groups: bool,
+    decimal_places: int | None = None,
 ) -> float | None:
     text = "".join(word for word, _ in numeric_words)
     number = _number_from_token(text)
-    if (
-        number is None
-        or not infer_decimal_from_word_groups
-        or any("." in word or "," in word for word, _ in numeric_words)
-    ):
+    if number is None or not infer_decimal_from_word_groups:
         return number
 
     digit_groups = [
@@ -83,14 +80,24 @@ def _number_from_google_vision_words(
         for word, _ in numeric_words
         for group in re.findall(r"[0-9OQIL]+", word.upper())
     ]
-    if len(digit_groups) < 2:
-        return number
+    if decimal_places is not None:
+        digits = "".join(digit_groups)
+        if len(digits) <= decimal_places:
+            return None
+        return _number_from_token(
+            f"{digits[:-decimal_places]}.{digits[-decimal_places:]}"
+        )
 
-    # Vision can replace a PIUSI row's decimal mark with a space.
-    inferred_number = _number_from_token(
-        f"{digit_groups[0]}.{''.join(digit_groups[1:])}"
-    )
-    return inferred_number if inferred_number is not None else number
+    if any("." in word or "," in word for word, _ in numeric_words):
+        return number
+    if len(digit_groups) >= 2:
+        # Vision can replace a PIUSI row's decimal mark with a space.
+        inferred_number = _number_from_token(
+            f"{digit_groups[0]}.{''.join(digit_groups[1:])}"
+        )
+        return inferred_number if inferred_number is not None else number
+
+    return number
 
 
 def parse_meter_ocr_data(
@@ -248,6 +255,7 @@ def _google_vision_word_lines(
     document: dict[str, object],
     *,
     infer_decimal_from_word_groups: bool = False,
+    decimal_places_by_row: tuple[int, ...] | None = None,
 ) -> list[tuple[int, str, float]]:
     words = []
     pages = document.get("pages", [])
@@ -353,6 +361,12 @@ def _google_vision_word_lines(
             numeric_words,
             infer_decimal_from_word_groups=(
                 infer_decimal_from_word_groups or len(readings) == 1
+            ),
+            decimal_places=(
+                decimal_places_by_row[len(readings)]
+                if decimal_places_by_row is not None
+                and len(readings) < len(decimal_places_by_row)
+                else None
             ),
         )
         if number is None:
@@ -528,28 +542,42 @@ def _extract_google_vision_readings(
     ):
         return display_result
 
+    display_document = responses[0].get("fullTextAnnotation")
+    display_readings = (
+        _google_vision_word_lines(
+            display_document,
+            infer_decimal_from_word_groups=True,
+            decimal_places_by_row=(3, 4),
+        )
+        if isinstance(display_document, dict)
+        else []
+    )
+    display_current = display_readings[0] if display_readings else None
+
     current_response = responses[1]
     current_error = current_response.get("error")
-    if isinstance(current_error, dict):
+    if isinstance(current_error, dict) and display_current is None:
         message = current_error.get("message", "The OCR request was rejected.")
         return MeterOcrResult(
             status="failed",
             message=f"Google Vision error reading the current-fill row: {message}",
         )
     current_document = current_response.get("fullTextAnnotation")
-    if not isinstance(current_document, dict):
-        return MeterOcrResult(
-            status="uncertain",
-            current_fill_litres=display_result.current_fill_litres,
-            current_fill_confidence=display_result.current_fill_confidence,
-            message="Google Vision could not read the current-fill row. Retake the photo.",
+    current_readings = (
+        _google_vision_word_lines(
+            current_document,
+            infer_decimal_from_word_groups=True,
+            decimal_places_by_row=(3,),
         )
-
-    current_readings = _google_vision_word_lines(
-        current_document,
-        infer_decimal_from_word_groups=True,
+        if isinstance(current_document, dict)
+        else []
     )
-    if not current_readings:
+    current_reading = (
+        current_readings[0]
+        if current_readings
+        else display_current
+    )
+    if current_reading is None:
         return MeterOcrResult(
             status="uncertain",
             current_fill_litres=display_result.current_fill_litres,
@@ -577,6 +605,7 @@ def _extract_google_vision_readings(
     total_readings = _google_vision_word_lines(
         total_document,
         infer_decimal_from_word_groups=True,
+        decimal_places_by_row=(4,),
     )
     if not total_readings:
         return MeterOcrResult(
@@ -586,7 +615,7 @@ def _extract_google_vision_readings(
             message="Google Vision could not read the PIUSI TOTAL row. Retake the photo.",
         )
 
-    _, current_text, current_confidence = current_readings[0]
+    _, current_text, current_confidence = current_reading
     _, total_text, total_confidence = total_readings[0]
     return parse_meter_ocr_data(
         {

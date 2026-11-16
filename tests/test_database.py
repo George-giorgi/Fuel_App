@@ -1321,10 +1321,7 @@ class DatabaseTests(unittest.TestCase):
                 },
                 {
                     "fullTextAnnotation": vision_document(
-                        [
-                            vision_word("22", 10, 50, 0.96),
-                            vision_word("032", 40, 50, 0.96),
-                        ]
+                        []
                     )
                 },
                 {
@@ -1397,7 +1394,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.current_fill_litres, 22.032)
         self.assertEqual(result.cumulative_total_litres, 26.1563)
-        self.assertEqual(result.current_fill_confidence, 96.0)
+        self.assertEqual(result.current_fill_confidence, 94.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
