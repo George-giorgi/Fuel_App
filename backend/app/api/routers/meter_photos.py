@@ -20,6 +20,7 @@ from backend.app.repositories.vehicles import get_vehicle_by_id
 from backend.app.repositories.meter_photos import get_meter_photo_by_id
 from backend.app.schemas.meter_photo import (
     MeterPhotoRead,
+    MeterPhotoSessionCreate,
     MeterPhotoSessionRead,
     MeterPhotoVerify,
     QrSessionCreate,
@@ -30,7 +31,7 @@ from backend.app.services.meter_photos import (
     InvalidMeterPhoto,
     InvalidQrSession,
     UnsupportedMeterPhotoType,
-    create_assigned_vehicle_photo_session,
+    create_vehicle_photo_session,
     create_qr_session,
     store_meter_photo,
     verify_meter_photo,
@@ -47,16 +48,21 @@ router = APIRouter(tags=["meter photos"])
     response_model=MeterPhotoSessionRead,
     status_code=201,
 )
-def start_assigned_vehicle_photo_session(
+def start_vehicle_photo_session(
     response: Response,
     session: Annotated[Session, Depends(get_db_session)],
     employee: Annotated[Employee, Depends(get_current_employee)],
+    request: MeterPhotoSessionCreate | None = None,
 ) -> MeterPhotoSessionRead:
-    created = create_assigned_vehicle_photo_session(session, employee)
+    created = create_vehicle_photo_session(
+        session,
+        employee,
+        request.vehicle_id if request is not None else None,
+    )
     if created is None:
         raise HTTPException(
             status_code=404,
-            detail="No assigned vehicle is available for meter photo capture.",
+            detail="Vehicle not found or unavailable for meter photo capture.",
         )
     session_token, registration_number, expires_at = created
     response.headers["Cache-Control"] = "no-store"
@@ -91,14 +97,14 @@ def start_qr_session(
 
 
 @router.post("/api/meter-photos", response_model=MeterPhotoRead, status_code=201)
-async def upload_meter_photo(
+def upload_meter_photo(
     session_token: Annotated[str, Form(min_length=1, max_length=128)],
     photo: Annotated[UploadFile, File()],
     response: Response,
     session: Annotated[Session, Depends(get_db_session)],
     employee: Annotated[Employee, Depends(get_current_employee)],
 ) -> MeterPhotoRead:
-    content = await photo.read(MAX_METER_PHOTO_BYTES + 1)
+    content = photo.file.read(MAX_METER_PHOTO_BYTES + 1)
     if len(content) > MAX_METER_PHOTO_BYTES:
         raise HTTPException(
             status_code=413, detail="Meter photos must be 10 MB or smaller."
@@ -180,6 +186,8 @@ def confirm_meter_readings(
             session,
             employee,
             meter_photo_id,
+            request.current_fill_litres,
+            request.cumulative_total_litres,
         )
     except InvalidMeterVerification as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -206,6 +214,24 @@ def _meter_photo_read(
         ocr_cumulative_total_litres=meter_photo.ocr_cumulative_total_litres,
         ocr_current_fill_confidence=meter_photo.ocr_current_fill_confidence,
         ocr_cumulative_total_confidence=meter_photo.ocr_cumulative_total_confidence,
+        ocr_provider=meter_photo.ocr_provider,
+        ocr_current_fill_raw_digits=meter_photo.ocr_current_fill_raw_digits,
+        ocr_current_fill_decimal_position=(
+            meter_photo.ocr_current_fill_decimal_position
+        ),
+        ocr_cumulative_total_raw_digits=(
+            meter_photo.ocr_cumulative_total_raw_digits
+        ),
+        ocr_cumulative_total_decimal_position=(
+            meter_photo.ocr_cumulative_total_decimal_position
+        ),
+        ocr_current_fill_segment_confidence=(
+            meter_photo.ocr_current_fill_segment_confidence
+        ),
+        ocr_cumulative_total_segment_confidence=(
+            meter_photo.ocr_cumulative_total_segment_confidence
+        ),
+        ocr_warnings=meter_photo.ocr_warnings,
         current_fill_litres=meter_photo.current_fill_litres,
         cumulative_total_litres=meter_photo.cumulative_total_litres,
         verified_at=meter_photo.verified_at,

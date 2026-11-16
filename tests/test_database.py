@@ -1,8 +1,10 @@
+import base64
 import json
 import os
 import asyncio
 import unittest
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from hashlib import sha256
 from http.cookies import SimpleCookie
 from io import BytesIO
@@ -18,6 +20,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
+from backend.app.cli import reset_production_data
 from backend.app.api.routers.auth import login as login_endpoint
 from backend.app.api.routers.auth import logout as logout_endpoint
 from backend.app.api.routers.admin import (
@@ -28,6 +31,7 @@ from backend.app.api.routers.admin import (
 )
 from backend.app.api.routers.meter_photos import (
     read_meter_photo_content as read_meter_photo_content_endpoint,
+    start_vehicle_photo_session as start_vehicle_photo_session_endpoint,
 )
 from backend.app.api.routers.fuel_records import read_fuel_records
 from backend.app.api.dependencies import (
@@ -40,6 +44,7 @@ from backend.app.api.routers.vehicles import (
     lookup_vehicle,
     my_vehicle,
     my_vehicle_fuel_records,
+    vehicle_registration_suggestions,
 )
 from backend.app.core.config import (
     SESSION_COOKIE_NAME,
@@ -78,7 +83,10 @@ from backend.app.schemas.admin_dashboard import (
     AdminFuelSummaryRead,
 )
 from backend.app.schemas.fuel_record import FuelRecordCreate, FuelRecordRead
-from backend.app.schemas.meter_photo import MeterPhotoVerify
+from backend.app.schemas.meter_photo import (
+    MeterPhotoSessionCreate,
+    MeterPhotoVerify,
+)
 from backend.app.services.fuel_records import (
     FuelSubmissionError,
     MeterPhotoNotOwned,
@@ -112,6 +120,7 @@ from backend.app.services.meter_photos import (
     UnsupportedMeterPhotoType,
     create_assigned_vehicle_photo_session,
     create_qr_session,
+    create_vehicle_photo_session,
     store_meter_photo,
     validate_meter_photo,
     verify_meter_photo,
@@ -119,6 +128,7 @@ from backend.app.services.meter_photos import (
 from backend.app.services.meter_ocr import (
     MeterOcrResult,
     extract_meter_readings,
+    _extract_google_vision_readings,
     parse_meter_ocr_data,
 )
 from backend.app.services.vehicle_meter_events import authorize_odometer_correction
@@ -132,8 +142,10 @@ from backend.app.services.admin_dashboard import (
     AdminEmployeeNotFound,
     InvalidAdminDateRange,
     get_admin_fuel_summary,
+    list_admin_employees,
     list_employee_fuel_records,
 )
+from backend.app.services.application_reset import reset_application_data
 from backend.app.services.vehicles import (
     create_vehicle,
     identify_vehicle,
@@ -153,6 +165,125 @@ class DatabaseTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.engine.dispose()
+
+    def test_list_admin_employees_orders_case_insensitively(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            create_employee(session, "zoe@example.com", "zoe", "password123456")
+            create_employee(session, "alice@example.com", "Alice", "password123456")
+            create_employee(session, "bob@example.com", "bob", "password123456")
+
+        with Session(self.engine) as session:
+            employees = list_admin_employees(session)
+
+        self.assertEqual([employee.name for employee in employees], [
+            "Alice",
+            "bob",
+            "zoe",
+        ])
+
+    def test_application_reset_preserves_admin_and_clears_all_app_data(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            admin = bootstrap_admin(
+                session, "admin@example.com", "Admin", "admin-password-123"
+            )
+            employee = create_employee(
+                session, "employee@example.com", "Employee", "employee-password-123"
+            )
+            vehicle = create_vehicle(session, "AB12 CDE")
+            employee.vehicles.append(vehicle)
+            session.flush()
+
+            qr_session = QrSession(
+                token_hash="a" * 64,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                created_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+            session.add(qr_session)
+            session.flush()
+            photo_key = "meter-photo-test.jpg"
+            photo = MeterPhoto(
+                qr_session_id=qr_session.id,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                storage_key=photo_key,
+                content_type="image/jpeg",
+                size_bytes=1,
+                sha256="b" * 64,
+                uploaded_at=datetime.now(timezone.utc),
+            )
+            session.add(photo)
+            session.flush()
+            session.add(
+                FuelRecord(
+                    reg_number=vehicle.registration_number,
+                    fuel_type="Diesel",
+                    first_name="Employee",
+                    surname="Test",
+                    mileage_miles=100,
+                    capacity=60,
+                    litres=20,
+                    employee_id=employee.id,
+                    vehicle_id=vehicle.id,
+                    meter_photo_id=photo.id,
+                )
+            )
+            session.flush()
+
+            photo_keys = reset_application_data(session)
+
+            self.assertEqual(photo_keys, [photo_key])
+            self.assertEqual(admin.role, "admin")
+
+        with Session(self.engine) as session:
+            employees = list(session.scalars(select(Employee)))
+            self.assertEqual(
+                [(employee.email, employee.role) for employee in employees],
+                [("admin@example.com", "admin")],
+            )
+            for table in Base.metadata.sorted_tables:
+                if table.name == Employee.__tablename__:
+                    continue
+                self.assertEqual(
+                    session.scalar(select(func.count()).select_from(table)),
+                    0,
+                    table.name,
+                )
+
+    def test_application_reset_refuses_to_run_without_one_admin(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            create_employee(
+                session, "employee@example.com", "Employee", "employee-password-123"
+            )
+
+        with Session(self.engine) as session:
+            with self.assertRaisesRegex(ValueError, "exactly one administrator"):
+                reset_application_data(session)
+            employees = list(session.scalars(select(Employee)))
+
+        self.assertEqual(len(employees), 1)
+
+    def test_production_reset_command_refuses_non_production_environment(self) -> None:
+        with patch.dict(os.environ, {"FUEL_ENV": "development"}, clear=True):
+            with patch("builtins.input") as input_mock:
+                result = reset_production_data()
+
+        self.assertEqual(result, 2)
+        input_mock.assert_not_called()
+
+    def test_production_reset_command_refuses_sqlite_database(self) -> None:
+        fake_engine = MagicMock()
+        fake_engine.dialect.name = "sqlite"
+        with (
+            patch.dict(os.environ, {"FUEL_ENV": "production"}, clear=True),
+            patch("backend.app.cli.engine", fake_engine),
+            patch("builtins.input") as input_mock,
+        ):
+            result = reset_production_data()
+
+        self.assertEqual(result, 2)
+        input_mock.assert_not_called()
 
     def _create_verified_meter_photo(
         self,
@@ -1065,9 +1196,75 @@ class DatabaseTests(unittest.TestCase):
                 "/opt/local/bin/tesseract",
             )
 
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 5.0)
-        self.assertEqual(result.cumulative_total_litres, 9667.5)
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.current_fill_litres)
+        self.assertIsNone(result.cumulative_total_litres)
+
+    def test_tesseract_detects_standard_windows_install_path(self) -> None:
+        import pytesseract
+
+        image_buffer = BytesIO()
+        Image.new("RGB", (32, 32), color="white").save(image_buffer, format="PNG")
+        ocr_data = {
+            "text": ["5.00", "9667.50"],
+            "conf": ["96", "94"],
+            "top": ["10", "20"],
+            "block_num": ["1", "1"],
+            "par_num": ["1", "1"],
+            "line_num": ["1", "2"],
+        }
+        windows_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        with (
+            patch.dict(os.environ, {"TESSERACT_CMD": ""}),
+            patch.object(pytesseract.pytesseract, "tesseract_cmd", "tesseract"),
+            patch(
+                "backend.app.services.meter_ocr.shutil.which",
+                return_value=None,
+            ),
+            patch(
+                "backend.app.services.meter_ocr.os.access",
+                side_effect=lambda path, mode: path == windows_path,
+            ),
+            patch("pytesseract.image_to_data", return_value=ocr_data),
+        ):
+            result = extract_meter_readings(image_buffer.getvalue())
+            self.assertEqual(pytesseract.pytesseract.tesseract_cmd, windows_path)
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.current_fill_litres)
+        self.assertIsNone(result.cumulative_total_litres)
+
+    def test_tesseract_retries_center_crop_with_digit_whitelist(self) -> None:
+        import pytesseract
+
+        image_buffer = BytesIO()
+        Image.new("RGB", (1000, 1000), color="white").save(
+            image_buffer, format="PNG"
+        )
+        readings = {
+            "text": ["12.5", "261563.0"],
+            "conf": ["96", "94"],
+            "top": ["100", "300"],
+            "block_num": ["1", "1"],
+            "par_num": ["1", "1"],
+            "line_num": ["1", "2"],
+        }
+        with (
+            patch.dict(os.environ, {"TESSERACT_CMD": ""}),
+            patch(
+                "pytesseract.image_to_data",
+                side_effect=[{}, {}, {}, {}, readings],
+            ) as image_to_data,
+        ):
+            result = extract_meter_readings(image_buffer.getvalue())
+
+        calls = image_to_data.call_args_list
+        self.assertEqual(calls[0].args[0].size, (1600, 1600))
+        self.assertEqual(calls[4].args[0].size, (1600, 819))
+        self.assertIn("tessedit_char_whitelist", calls[1].kwargs["config"])
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.current_fill_litres)
+        self.assertIsNone(result.cumulative_total_litres)
 
     def test_tesseract_failure_is_reported_without_auto_acceptance(self) -> None:
         import pytesseract
@@ -1099,36 +1296,52 @@ class DatabaseTests(unittest.TestCase):
                 "confidence": confidence,
             }
 
-        google_response = {
-            "responses": [
-                {
-                    "fullTextAnnotation": {
-                        "pages": [
+        def vision_document(words: list[dict]) -> dict:
+            return {
+                "pages": [
+                    {
+                        "blocks": [
                             {
-                                "blocks": [
-                                    {
-                                        "paragraphs": [
-                                            {
-                                                "words": [
-                                                    vision_word("5", 10, 100, 0.94),
-                                                    vision_word(".", 30, 100, 0.90),
-                                                    vision_word("00", 40, 100, 0.92),
-                                                    vision_word("9667.50", 10, 150, 0.96),
-                                                ]
-                                            }
-                                        ]
-                                    }
+                                "paragraphs": [
+                                    {"words": words}
                                 ]
                             }
                         ]
                     }
-                }
+                ]
+            }
+
+        google_response = {
+            "responses": [
+                {
+                    "fullTextAnnotation": vision_document(
+                        [
+                            vision_word("22032", 10, 100, 0.94),
+                            vision_word("26.56", 10, 150, 0.96),
+                        ]
+                    )
+                },
+                {
+                    "fullTextAnnotation": vision_document(
+                        []
+                    )
+                },
+                {
+                    "fullTextAnnotation": vision_document(
+                        [
+                            vision_word("26", 10, 50, 0.96),
+                            vision_word("1563", 40, 50, 0.96),
+                        ]
+                    )
+                },
             ]
         }
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
             google_response
         ).encode()
+        image = BytesIO()
+        Image.new("RGB", (768, 1024), "white").save(image, format="JPEG")
         with (
             patch.dict(
                 os.environ,
@@ -1142,40 +1355,156 @@ class DatabaseTests(unittest.TestCase):
                 return_value=response,
             ) as urlopen_mock,
         ):
-            result = extract_meter_readings(b"test-image")
+            result = _extract_google_vision_readings(
+                image.getvalue(), "test-key"
+            )
 
         request = urlopen_mock.call_args.args[0]
         request_payload = json.loads(request.data)
         self.assertEqual(request.method, "POST")
         self.assertEqual(parse_qs(urlparse(request.full_url).query), {"key": ["test-key"]})
+        self.assertEqual(len(request_payload["requests"]), 3)
         self.assertEqual(
             request_payload["requests"][0]["features"],
-            [{"type": "DOCUMENT_TEXT_DETECTION"}],
+            [
+                {"type": "TEXT_DETECTION"},
+                {"type": "DOCUMENT_TEXT_DETECTION"},
+            ],
         )
-        self.assertEqual(
-            request_payload["requests"][0]["image"]["content"],
-            "dGVzdC1pbWFnZQ==",
+        prepared_image = Image.open(
+            BytesIO(
+                base64.b64decode(
+                    request_payload["requests"][0]["image"]["content"]
+                )
+            )
         )
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 5.0)
-        self.assertEqual(result.cumulative_total_litres, 9667.5)
-        self.assertEqual(result.current_fill_confidence, 93.0)
+        self.assertEqual(prepared_image.width, 1200)
+        self.assertLess(prepared_image.height, 1024)
+        current_row_image = Image.open(
+            BytesIO(
+                base64.b64decode(
+                    request_payload["requests"][1]["image"]["content"]
+                )
+            )
+        )
+        self.assertEqual(current_row_image.width, 1600)
+        self.assertLess(current_row_image.height, prepared_image.height)
+        total_row_image = Image.open(
+            BytesIO(
+                base64.b64decode(
+                    request_payload["requests"][2]["image"]["content"]
+                )
+            )
+        )
+        self.assertEqual(total_row_image.width, 1600)
+        self.assertLess(total_row_image.height, prepared_image.height)
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.current_fill_raw_digits, "22032")
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertIsNone(result.current_fill_decimal_position)
+        self.assertIsNone(result.cumulative_total_decimal_position)
+        self.assertEqual(result.current_fill_confidence, 94.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
+        def read_with_total_candidates(
+            display_total: str,
+            close_total: str,
+            confidence: float,
+        ) -> MeterOcrResult:
+            response_data = {
+                "responses": [
+                    {
+                        "fullTextAnnotation": vision_document(
+                            [
+                                vision_word("22032", 10, 100, 0.96),
+                                vision_word(display_total, 10, 150, 0.96),
+                            ]
+                        )
+                    },
+                    {"fullTextAnnotation": vision_document([])},
+                    {
+                        "fullTextAnnotation": vision_document(
+                            [vision_word(close_total, 10, 50, confidence)]
+                        )
+                    },
+                ]
+            }
+            variant_response = MagicMock()
+            variant_response.__enter__.return_value.read.return_value = json.dumps(
+                response_data
+            ).encode()
+            detected_response = MagicMock()
+            detected_response.__enter__.return_value.read.return_value = json.dumps(
+                {
+                    "responses": [
+                        {
+                            "fullTextAnnotation": vision_document(
+                                [
+                                    vision_word("26", 10, 50, 0.96),
+                                    vision_word("1563", 40, 50, 0.96),
+                                ]
+                            )
+                        }
+                    ]
+                }
+            ).encode()
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "FUEL_OCR_PROVIDER": "google_vision",
+                        "GOOGLE_CLOUD_VISION_API_KEY": "test-key",
+                    },
+                ),
+                patch(
+                    "backend.app.services.meter_ocr.urlopen",
+                    side_effect=[variant_response, detected_response],
+                ),
+            ):
+                return _extract_google_vision_readings(
+                    image.getvalue(), "test-key"
+                )
+
+        disagreeing_total = read_with_total_candidates(
+            "261563",
+            "2615631",
+            0.96,
+        )
+        self.assertEqual(disagreeing_total.status, "uncertain")
+        self.assertIn("different PIUSI TOTAL values", disagreeing_total.message)
+
+        low_confidence_total = read_with_total_candidates(
+            "26.56",
+            "2615631",
+            0.65,
+        )
+        self.assertEqual(low_confidence_total.status, "uncertain")
+        self.assertEqual(low_confidence_total.cumulative_total_raw_digits, "261563")
+        self.assertEqual(low_confidence_total.cumulative_total_confidence, 96.0)
+
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
+        image = BytesIO()
+        Image.new("RGB", (768, 1024), "white").save(image, format="JPEG")
+        image_content = image.getvalue()
         with patch.dict(
             os.environ,
             {"FUEL_OCR_PROVIDER": "google_vision"},
             clear=True,
         ):
-            missing_key = extract_meter_readings(b"test-image")
+            missing_key = extract_meter_readings(image_content)
 
         self.assertEqual(missing_key.status, "unavailable")
         self.assertIn("GOOGLE_CLOUD_VISION_API_KEY", missing_key.message)
 
         response = MagicMock()
         response.__enter__.return_value.read.return_value = json.dumps(
-            {"responses": [{"error": {"message": "API key invalid"}}]}
+            {
+                "responses": [
+                    {"error": {"message": "API key invalid"}},
+                    {},
+                    {},
+                ]
+            }
         ).encode()
         with (
             patch.dict(
@@ -1190,10 +1519,93 @@ class DatabaseTests(unittest.TestCase):
                 return_value=response,
             ),
         ):
-            api_error = extract_meter_readings(b"test-image")
+            api_error = extract_meter_readings(image_content)
 
         self.assertEqual(api_error.status, "failed")
         self.assertIn("API key invalid", api_error.message)
+
+    def test_production_defaults_to_google_vision(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"FUEL_ENV": "production", "GOOGLE_CLOUD_VISION_API_KEY": ""},
+            clear=True,
+        ):
+            result = extract_meter_readings(b"test-image")
+
+        self.assertEqual(result.status, "unavailable")
+        self.assertIn("Google Vision is selected", result.message)
+
+    def test_local_defaults_to_google_vision_when_key_is_configured(self) -> None:
+        expected = MeterOcrResult(
+            status="ready",
+            current_fill_litres=12.5,
+            cumulative_total_litres=261563.0,
+            current_fill_confidence=99,
+            cumulative_total_confidence=99,
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "FUEL_ENV": "development",
+                    "GOOGLE_CLOUD_VISION_API_KEY": "test-key",
+                },
+                clear=True,
+            ),
+            patch(
+                "backend.app.services.meter_ocr._extract_google_vision_readings",
+                return_value=expected,
+            ) as vision_mock,
+            patch(
+                "backend.app.services.meter_ocr.recognize_piusi_lcd",
+                return_value=object(),
+            ) as lcd_mock,
+            patch(
+                "backend.app.services.meter_ocr._apply_piusi_evidence",
+                side_effect=lambda result, _lcd, _provider: result,
+            ),
+            patch(
+                "backend.app.services.meter_ocr._extract_tesseract_readings"
+            ) as tesseract_mock,
+        ):
+            result = extract_meter_readings(b"meter image")
+
+        self.assertEqual(result, expected)
+        vision_mock.assert_called_once_with(
+            b"meter image", "test-key", lcd_mock.return_value
+        )
+        tesseract_mock.assert_not_called()
+
+    def test_local_defaults_to_tesseract_without_google_vision_key(self) -> None:
+        expected = MeterOcrResult(status="uncertain")
+        with (
+            patch.dict(
+                os.environ,
+                {"FUEL_ENV": "development"},
+                clear=True,
+            ),
+            patch(
+                "backend.app.services.meter_ocr._extract_google_vision_readings"
+            ) as vision_mock,
+            patch(
+                "backend.app.services.meter_ocr._extract_tesseract_readings",
+                return_value=expected,
+            ) as tesseract_mock,
+            patch(
+                "backend.app.services.meter_ocr.recognize_piusi_lcd",
+                return_value=object(),
+            ) as lcd_mock,
+            patch(
+                "backend.app.services.meter_ocr._apply_piusi_evidence",
+                side_effect=lambda result, _lcd, _provider: result,
+            ),
+        ):
+            result = extract_meter_readings(b"meter image")
+
+        self.assertEqual(result, expected)
+        tesseract_mock.assert_called_once_with(b"meter image")
+        self.assertEqual(lcd_mock.call_count, 1)
+        vision_mock.assert_not_called()
 
     def test_fuel_submission_uses_fill_and_compares_cumulative_reading(self) -> None:
         with Session(self.engine) as session, session.begin():
@@ -1262,6 +1674,119 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(response_data["cumulativeTotalLitres"], 105.05)
         self.assertEqual(response_data["mileageMiles"], 1100.0)
         self.assertEqual(response_data["currentOdometerMiles"], 1100.0)
+
+    def test_boss_can_find_and_record_a_fill_for_another_registered_vehicle(
+        self,
+    ) -> None:
+        image_buffer = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(image_buffer, format="PNG")
+
+        with Session(self.engine) as session, session.begin():
+            boss = create_employee(
+                session,
+                "fleet-boss@example.test",
+                "Fleet Boss",
+                "temporary-password",
+                role="boss",
+            )
+            assigned_driver = create_employee(
+                session,
+                "fleet-driver@example.test",
+                "Fleet Driver",
+                "temporary-password",
+            )
+            other_driver = create_employee(
+                session,
+                "other-driver@example.test",
+                "Other Driver",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "AB12 CDE")
+            vehicle.fuel_type = "Diesel"
+            vehicle.tank_capacity = 80
+            assigned_driver.vehicles.append(vehicle)
+            other_vehicle = create_vehicle(session, "XY34 ZZZ")
+            other_driver.vehicles.append(other_vehicle)
+
+            found_vehicle = lookup_vehicle(
+                "ab12 cde", session=session, employee=boss
+            )
+            self.assertEqual(found_vehicle.id, vehicle.id)
+            self.assertEqual(found_vehicle.registration_number, "AB12 CDE")
+
+            created_session = start_vehicle_photo_session_endpoint(
+                Response(),
+                session,
+                boss,
+                MeterPhotoSessionCreate(vehicle_id=found_vehicle.id),
+            )
+            session_token = created_session.session_token
+            self.assertEqual(
+                created_session.registration_number, vehicle.registration_number
+            )
+
+            with TemporaryDirectory() as upload_directory:
+                with (
+                    patch(
+                        "backend.app.services.photo_storage.METER_PHOTO_DIRECTORY",
+                        Path(upload_directory),
+                    ),
+                    patch(
+                        "backend.app.services.meter_photos.extract_meter_readings",
+                        return_value=MeterOcrResult(
+                            status="ready",
+                            current_fill_litres=10,
+                            cumulative_total_litres=10,
+                            current_fill_confidence=99,
+                            cumulative_total_confidence=99,
+                        ),
+                    ),
+                ):
+                    photo, _ = store_meter_photo(
+                        session,
+                        boss,
+                        session_token,
+                        image_buffer.getvalue(),
+                        "image/png",
+                    )
+
+            verified_photo = verify_meter_photo(session, boss, photo.id)
+            self.assertIsNotNone(verified_photo)
+            record = save_fuel_record(
+                session,
+                boss,
+                FuelRecordCreate(
+                    meter_photo_id=photo.id,
+                    odometer_miles=1000,
+                    vehicle_id=vehicle.id,
+                ),
+            )
+            self.assertEqual(record.vehicle_id, vehicle.id)
+            self.assertEqual(record.reg_number, "AB12 CDE")
+
+            with self.assertRaises(MeterPhotoNotOwned):
+                save_fuel_record(
+                    session,
+                    boss,
+                    FuelRecordCreate(
+                        meter_photo_id=photo.id,
+                        odometer_miles=1000,
+                        vehicle_id=other_vehicle.id,
+                    ),
+                )
+            self.assertIsNone(
+                create_vehicle_photo_session(session, other_driver, vehicle.id)
+            )
+            with self.assertRaisesRegex(FuelSubmissionError, "Only boss accounts"):
+                save_fuel_record(
+                    session,
+                    other_driver,
+                    FuelRecordCreate(
+                        meter_photo_id=photo.id,
+                        odometer_miles=1000,
+                        vehicle_id=vehicle.id,
+                    ),
+                )
 
     def test_demo_employee_fills_update_the_global_reading_and_history(self) -> None:
         with Session(self.engine) as session, session.begin():
@@ -1493,7 +2018,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn("isActive", employee_payload)
         self.assertIn("totalFillLitres", summary_payload)
 
-    def test_uncertain_ocr_cannot_be_verified_or_entered_manually(self) -> None:
+    def test_uncertain_ocr_requires_manual_confirmation_of_both_values(self) -> None:
         with Session(self.engine) as session, session.begin():
             employee = create_employee(
                 session, "uncertain@example.test", "Uncertain Worker", "temporary-password"
@@ -1517,16 +2042,30 @@ class DatabaseTests(unittest.TestCase):
                 verify=False,
             )
 
-            with self.assertRaisesRegex(InvalidMeterVerification, "cannot be entered"):
-                verify_meter_photo(session, employee, photo.id)
             with self.assertRaises(ValueError):
                 MeterPhotoVerify.model_validate(
                     {
                         "confirmed": True,
                         "currentFillLitres": 7.5,
-                        "cumulativeTotalLitres": 107.5,
                     }
                 )
+            request = MeterPhotoVerify.model_validate(
+                {
+                    "confirmed": True,
+                    "currentFillLitres": "7.5",
+                    "cumulativeTotalLitres": "107.5",
+                }
+            )
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                request.current_fill_litres,
+                request.cumulative_total_litres,
+            )
+            self.assertEqual(verified.current_fill_litres, 7.5)
+            self.assertEqual(verified.cumulative_total_litres, 107.5)
+            self.assertEqual(verified.verification_method, "manual_correction")
             with self.assertRaises(ValueError):
                 FuelRecordCreate.model_validate(
                     {
@@ -1540,6 +2079,81 @@ class DatabaseTests(unittest.TestCase):
                 FuelRecordCreate.model_validate(
                     {"meterPhotoId": photo.id, "odometerKm": 1000}
                 )
+
+    def test_manual_readings_warn_for_capacity_and_lower_total_without_rejecting(
+        self,
+    ) -> None:
+        with Session(self.engine) as session, session.begin():
+            employee = create_employee(
+                session,
+                "manual-warning@example.test",
+                "Manual Worker",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "mw12 arn")
+            vehicle.tank_capacity = 50
+            employee.vehicles.append(vehicle)
+            session.add(
+                GlobalMeterState(
+                    id=1,
+                    current_cumulative_total_litres=100,
+                )
+            )
+            photo = self._create_verified_meter_photo(
+                session,
+                employee,
+                vehicle,
+                7.5,
+                107.5,
+                ocr_result=MeterOcrResult(status="uncertain"),
+                verify=False,
+            )
+
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                Decimal("60"),
+                Decimal("90"),
+            )
+
+            self.assertIsNotNone(verified.verified_at)
+            self.assertEqual(verified.current_fill_litres, 60)
+            self.assertEqual(verified.cumulative_total_litres, 90)
+            self.assertTrue(
+                any("tank capacity" in warning for warning in verified.ocr_warnings)
+            )
+            self.assertTrue(
+                any(
+                    "previous accepted reading" in warning
+                    for warning in verified.ocr_warnings
+                )
+            )
+
+    def test_long_ocr_message_is_limited_to_database_column_length(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            employee = create_employee(
+                session,
+                "long-ocr-message@example.test",
+                "OCR Message Worker",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "lm12 reg")
+            employee.vehicles.append(vehicle)
+            photo = self._create_verified_meter_photo(
+                session,
+                employee,
+                vehicle,
+                7.5,
+                107.5,
+                ocr_result=MeterOcrResult(
+                    status="uncertain",
+                    message="ocr warning; " * 40,
+                ),
+                verify=False,
+            )
+
+            self.assertEqual(len(photo.ocr_message), 255)
 
     def test_odometer_decrease_requires_single_use_admin_correction(self) -> None:
         with Session(self.engine) as session, session.begin():
@@ -2432,6 +3046,75 @@ class DatabaseTests(unittest.TestCase):
                 {record.vehicle_id for record in emma2_records}
             )
         )
+
+    def test_boss_vehicle_registration_suggestions_filter_active_vehicles(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            boss = create_employee(
+                session,
+                "vehicle-suggest-boss@example.test",
+                "Vehicle Suggest Boss",
+                "temporary-password",
+                role="boss",
+            )
+            employee = create_employee(
+                session,
+                "vehicle-suggest-employee@example.test",
+                "Vehicle Suggest Employee",
+                "temporary-password",
+            )
+            vehicles = [
+                create_vehicle(session, registration)
+                for registration in (
+                    "AB12 CDE",
+                    "XY12 ZZZ",
+                    "ZX99 ABC",
+                )
+            ]
+            vehicles[2].is_active = False
+
+            self.assertEqual(
+                vehicle_registration_suggestions(
+                    session=session, employee=boss, search=None
+                ),
+                ["AB12 CDE", "XY12 ZZZ"],
+            )
+            self.assertEqual(
+                vehicle_registration_suggestions(
+                    session=session, employee=boss, search="12"
+                ),
+                ["AB12 CDE", "XY12 ZZZ"],
+            )
+            self.assertEqual(
+                vehicle_registration_suggestions(
+                    session=session, employee=boss, search="ab%"
+                ),
+                [],
+            )
+            with self.assertRaises(HTTPException) as forbidden:
+                vehicle_registration_suggestions(
+                    session=session, employee=employee, search=None
+                )
+            self.assertEqual(forbidden.exception.status_code, 403)
+
+    def test_boss_vehicle_suggestions_prioritize_registration_prefixes(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            boss = create_employee(
+                session,
+                "vehicle-prefix-boss@example.test",
+                "Vehicle Prefix Boss",
+                "temporary-password",
+                role="boss",
+            )
+            for index in range(12):
+                create_vehicle(session, f"A18MATCH{index:02d}")
+            create_vehicle(session, "182SO547")
+
+            suggestions = vehicle_registration_suggestions(
+                session=session, employee=boss, search="18"
+            )
+
+        self.assertEqual(suggestions[0], "182SO547")
+        self.assertIn("182SO547", suggestions)
 
     def test_assigned_vehicle_lookup_hides_other_employees_vehicle(self) -> None:
         with Session(self.engine) as session, session.begin():

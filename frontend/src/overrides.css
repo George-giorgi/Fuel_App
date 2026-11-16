@@ -1074,6 +1074,19 @@ select:focus-visible {
   min-width: 0;
 }
 
+.employee-topbar-actions {
+  width: min(100%, 320px);
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.topbar-utility-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .content.content-admin-employees {
   padding-top: 8px;
 }
@@ -1084,6 +1097,7 @@ select:focus-visible {
 
 .topbar-primary-action {
   display: inline-flex;
+  width: 100%;
   min-height: 42px;
   align-items: center;
   justify-content: center;
@@ -1834,6 +1848,84 @@ select:focus-visible {
 
 .fuel-form label {
   font-size: 12px;
+}
+
+.boss-vehicle-picker {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.boss-vehicle-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.boss-vehicle-suggestions {
+  z-index: 3;
+  grid-column: 1 / -1;
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.boss-vehicle-suggestions p,
+.boss-vehicle-suggestions button {
+  padding: 10px 12px;
+  color: var(--ink);
+  font-size: 11px;
+  text-align: left;
+}
+
+.boss-vehicle-suggestions p {
+  color: var(--muted);
+}
+
+.boss-vehicle-suggestions button {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.boss-vehicle-suggestions button:last-child {
+  border-bottom: 0;
+}
+
+.boss-vehicle-suggestions button:hover,
+.boss-vehicle-suggestions button[aria-selected='true'] {
+  background: var(--surface-muted);
+}
+
+
+
+.boss-selected-vehicle {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.boss-selected-vehicle strong {
+  color: var(--ink);
+}
+
+.boss-vehicle-search-hint {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+@media (max-width: 520px) {
+  .boss-vehicle-search {
+    grid-template-columns: 1fr;
+  }
 }
 
 .vehicle-lookup-row .outline-button {
@@ -2881,6 +2973,25 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.meter-readings small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.meter-ocr-warnings {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .meter-review-form {
   display: grid;
   gap: 12px;
@@ -2900,7 +3011,7 @@ select:focus-visible {
   font-weight: 700;
 }
 
-.meter-review-form input[type='number'] {
+.meter-review-form input:not([type='checkbox']) {
   min-width: 0;
   padding: 10px;
   border: 1px solid var(--line);
@@ -3534,6 +3645,7 @@ footer {
 .global-meter-photo {
   display: flex;
   min-width: 0;
+  align-self: start;
   flex-direction: column;
   gap: 8px;
   margin: 0;
@@ -3542,8 +3654,9 @@ footer {
 .global-meter-photo > a,
 .global-meter-photo-empty {
   display: grid;
-  min-height: 145px;
-  flex: 1;
+  height: 180px;
+  min-height: 0;
+  flex: 0 0 180px;
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -3552,10 +3665,11 @@ footer {
 }
 
 .global-meter-photo img {
+  display: block;
   width: 100%;
   height: 100%;
-  min-height: 145px;
-  object-fit: cover;
+  min-height: 0;
+  object-fit: contain;
 }
 
 .global-meter-photo-empty {
@@ -3948,7 +4062,8 @@ footer {
 
   .global-meter-photo > a,
   .global-meter-photo-empty {
-    min-height: 190px;
+    height: 180px;
+    flex-basis: 180px;
   }
 
   .global-meter-event-form {
@@ -4983,10 +5098,21 @@ footer {
 }
 
 @media (max-width: 700px) {
+  .admin-app-shell .sidebar nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
   .admin-sidebar-tabs {
     display: flex;
     width: max-content;
     min-width: 100%;
+  }
+
+  .admin-app-shell .sidebar nav .admin-sidebar-tabs {
+    flex: 0 0 auto;
   }
 
   .sidebar nav .admin-sidebar-tabs button {
@@ -5041,6 +5167,30 @@ footer {
   .history-actions {
     flex-direction: column;
     gap: 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-app-shell .sidebar nav {
+    display: block;
+    overflow: visible;
+  }
+
+  .admin-app-shell .sidebar nav .admin-sidebar-tabs {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sidebar nav .admin-sidebar-tabs button {
+    width: 100%;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .sidebar nav .admin-sidebar-tabs button.active::before {
+    bottom: 4px;
   }
 }
 
@@ -5969,9 +6119,15 @@ footer {
 }
 
 .admin-summary-tab .global-meter-photo > a,
-.admin-summary-tab .global-meter-photo-empty,
+.admin-summary-tab .global-meter-photo-empty {
+  height: 180px;
+  min-height: 0;
+  flex-basis: 180px;
+}
+
 .admin-summary-tab .global-meter-photo img {
-  min-height: 120px;
+  height: 100%;
+  min-height: 0;
 }
 
 .admin-summary-tab .global-meter-photo-empty {
@@ -7689,5 +7845,73 @@ footer {
     grid-column: auto;
     grid-row: auto;
     justify-self: start;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    position: relative;
+  }
+
+  .app-shell .sidebar {
+    padding: 12px 16px 8px;
+  }
+
+  .app-shell .sidebar-brand {
+    margin-bottom: 8px;
+    padding-right: 142px;
+  }
+
+  .employee-app-shell .topbar,
+  .admin-app-shell .topbar {
+    display: grid;
+    grid-template-areas:
+      'title title'
+      'cta cta';
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+  }
+
+  .employee-app-shell .topbar > div:first-child,
+  .admin-app-shell .topbar > div:first-child {
+    grid-area: title;
+    min-width: 0;
+  }
+
+  .employee-app-shell .topbar h2,
+  .admin-app-shell .topbar h2 {
+    font-size: clamp(22px, 6vw, 26px);
+    line-height: 1.1;
+  }
+
+  .employee-app-shell .topbar-actions,
+  .admin-app-shell .topbar-actions {
+    display: contents;
+  }
+
+  .employee-app-shell .topbar-utility-actions,
+  .admin-app-shell .topbar-utility-actions {
+    position: absolute;
+    z-index: 5;
+    top: 12px;
+    right: 16px;
+    width: max-content;
+    max-width: 100%;
+    gap: 8px;
+  }
+
+  .employee-app-shell .topbar-primary-action {
+    grid-area: cta;
+    justify-content: center;
+  }
+
+  .employee-app-shell .employee-topbar-actions .theme-toggle span {
+    display: none;
+  }
+
+  .content.content-admin-employees .topbar {
+    grid-template-areas: none;
   }
 }

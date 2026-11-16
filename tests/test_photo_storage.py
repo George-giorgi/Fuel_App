@@ -78,6 +78,25 @@ class PhotoStorageTests(unittest.TestCase):
             with self.assertRaises(PhotoStorageError):
                 photo_storage.store_photo(b"photo", ".jpg", "image/jpeg")
 
+    def test_r2_photo_deletion_uses_the_configured_private_bucket(self) -> None:
+        fake_client = Mock()
+        fake_client.delete_object.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 204}
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "FUEL_PHOTO_STORAGE": "r2",
+                "R2_BUCKET_NAME": "private-meter-photos",
+            },
+        ), patch.object(photo_storage, "_r2_client", return_value=fake_client):
+            photo_storage.delete_photo("meter-photo.jpg")
+
+        fake_client.delete_object.assert_called_once_with(
+            Bucket="private-meter-photos",
+            Key="meter-photo.jpg",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

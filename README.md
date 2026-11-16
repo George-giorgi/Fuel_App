@@ -119,8 +119,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   and `GOOGLE_CLOUD_VISION_API_KEY` only in Render's backend environment. For
   an existing manually created Render service, set
   `FUEL_OCR_PROVIDER=google_vision` and add a restricted Vision API key there,
-  then redeploy. Never prefix a secret with `VITE_`. Pages needs only
-  `API_ORIGIN`.
+  Production OCR is configured to use Google Cloud Vision; add a restricted
+  Vision API key in Render before deploying. Then redeploy. Never prefix a
+  secret with `VITE_`. Pages needs only `API_ORIGIN`.
 - **Administrator:** after Render has applied migrations, bootstrap the first
   admin once from a trusted local shell using the production Neon URL and the
   existing `python -m backend.app.cli bootstrap-admin` command. It prompts for
@@ -232,9 +233,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
 - The Registry supports Diesel, AdBlue, and Petrol fuel types when registering a
   vehicle or creating an employee with a new vehicle. Fuel type and tank capacity
   must be configured before that vehicle can record a fill.
-- Authenticated employees can look up vehicles by registration. The registries
-  start empty; sample identities and vehicles are created only when the explicit
-  local demo seed command is run.
+- Authenticated employees can look up vehicles available to them by registration.
+  Boss accounts can search all active registered vehicles for a fuel entry. The
+  registries start empty; sample identities and vehicles are created only when the
+  explicit local demo seed command is run.
 - Fuel-record reads now require authentication. Fuel-record submissions remain
   available only after verified meter-photo readings and server-side ownership
   checks. Reads return only the authenticated employee's records.
@@ -253,10 +255,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
 - Admins can issue or rotate an opaque vehicle QR token. Only its SHA-256 hash
   is stored in SQLite; the QR payload is shown once in the admin UI. Rotation
   invalidates the previously printed code.
-- The employee photo flow creates a one-use session bound to the authenticated
-  employee and a vehicle assigned to them. Vehicles may be shared by multiple
-  employees. Sessions expire after 10 minutes; the
-  QR-session API remains available for QR-based clients.
+- The photo flow creates a one-use session bound to the authenticated employee
+  and vehicle. Employees are limited to assigned vehicles; Boss accounts can
+  select another active vehicle from the fleet. Vehicles may be shared by multiple
+  employees. Sessions expire after 10 minutes; the QR-session API remains
+  available for QR-based clients.
 - Meter-photo uploads accept verified JPEG/PNG images up to 10 MB. Files are
   written with private local permissions under `uploads/meter-photos/`; the
   directory is not mounted or served as static content. SQLite stores only
@@ -264,20 +267,41 @@ imported. The Render start command applies schema-only Alembic upgrades.
 
 ## Phase 7: PIUSI meter readings
 
-- After login, the employee and assigned vehicle details are retrieved from
-  their existing SQLite rows. The vehicle response includes its most recently
-  recorded odometer. Employee and vehicle IDs are taken from the authenticated
-  session and database relationship, never from transaction form fields.
-- A private photo of a handwritten reading sheet is required. Write the current
-  fill on the first line and the cumulative total on the second line, using large,
-  clear digits and a thick dark marker (not pencil). Labels are not required.
-  Frame the readings close-up so they fill most of the image. Employees review
-  the extracted values and confirm they match the sheet; they cannot type or
-  change readings. Missing, low-confidence, or unavailable OCR blocks verification
-  and transaction submission.
-- Local Tesseract OCR is the default. To use Google Cloud Vision's handwriting
-  capable `DOCUMENT_TEXT_DETECTION`, set these variables in the backend
-  environment and restart FastAPI:
+- After login, employee and vehicle details are retrieved from their existing
+  SQLite rows. Vehicle responses include the most recently recorded odometer.
+  Employee IDs are taken from the authenticated session; only Boss accounts may
+  submit a vehicle ID, and the backend verifies it against the selected meter
+  photo and active vehicle record.
+- A private meter photo is required. The backend applies EXIF orientation,
+  locates and rectifies the green LCD area, crops its two rows separately, and
+  uses OpenCV to classify seven-segment digits and search for each row's decimal
+  point. Google Cloud Vision remains the primary production OCR provider; the
+  backend requests both `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses
+  their text/bounds as additional evidence, and compares Vision digits with the
+  independent segment result. Tesseract remains an optional local fallback.
+- Decimal positions are never restored from fixed row formats or digit counts.
+  Raw digits and the independently detected decimal position are stored
+  separately. A missing decimal point, a Vision/segment disagreement, or an
+  uncertain display crop blocks automatic verification. Employees see the
+  original photo, provider/confidence/warnings, raw segment digits, and editable
+  Current Fill and Cumulative Total fields; they must check both values against
+  the photo before submitting. Confirmation values are parsed as `Decimal`
+  before the existing database/business-rule layer is used. Current fill is
+  flagged when it exceeds a configured tank capacity, and a lower cumulative
+  total is flagged for reset/replacement review without changing the existing
+  submission rules.
+- A labeled reference image and dataset instructions are in
+  [`tests/datasets/piusi_k600_3`](./tests/datasets/piusi_k600_3). The reference
+  fixture labels Current Fill `22.032` and Cumulative Total `26.1563`; its
+  decimal dots are not confidently visible to the segment detector, so the
+  correct automated outcome is manual review rather than a guessed ready
+  reading. This single photo does not establish general accuracy. Add further
+  independently labeled, non-transaction photos there before assessing
+  accuracy.
+- The Render blueprint sets
+  `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
+  secret in the Render backend environment. Local development defaults to
+  Tesseract; to use Google Vision locally, set:
 
   ```bash
   export FUEL_OCR_PROVIDER=google_vision
@@ -285,14 +309,35 @@ imported. The Render start command applies schema-only Alembic upgrades.
   ```
 
   Keep the key out of source control and the frontend; restrict it to the Vision
-  API and your backend's use. In this mode, meter photos are sent from FastAPI to
-  Google for OCR. Google lists the first 1,000 Vision text/document-text
-  detection units per month as free; review the [current pricing](https://cloud.google.com/vision/pricing),
-  enable quota/billing alerts, and get approval before sending company photos.
-  Without `FUEL_OCR_PROVIDER=google_vision`, OCR remains local and uses Tesseract.
-- Install Tesseract only when using the local provider (for macOS, use
-  `brew install tesseract` or `sudo port install tesseract tesseract-eng`).
+  API and your backend's use. In this mode, each meter photo is sent from FastAPI
+  to Google as three OCR images (the full display and two digit-row crops). When
+  the TOTAL crop is unreadable or low-confidence, the backend uses Vision's
+  detected word bounds to crop and enlarge that exact row for a fourth pass.
+  Google lists the first 1,000 Vision units per month as free; review the
+  [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
+  alerts, and get approval before sending company photos.
+  When an LCD is detected, Vision receives a rectified display image and
+  separate enhanced row crops. If the TOTAL crop is unreadable or low-confidence,
+  the backend uses Vision's detected word bounds to crop and enlarge that exact
+  row for a fourth pass. The Render configuration and Google key remain
+  backend-only. Keep the key out of source control and the frontend; restrict it
+  to the Vision API and your backend's use. Google lists the first 1,000 Vision
+  units per month as free; review the
+  [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
+  alerts, and get approval before sending company photos. Local development
+  automatically uses Google Vision when
+  `GOOGLE_CLOUD_VISION_API_KEY` is configured, unless `FUEL_OCR_PROVIDER` is
+  explicitly set to another provider.
+  When `FUEL_ENV=production` and no provider is explicitly set, the backend
+  defaults to Google Vision. If the key is missing, OCR reports that Vision is
+  unavailable instead of silently falling back to local Tesseract.
+- Install Tesseract only when using the local provider. On Windows, install
+  `UB-Mannheim.TesseractOCR` with `winget install --id UB-Mannheim.TesseractOCR`;
+  the backend detects the standard install location automatically. On macOS, use
+  `brew install tesseract` or `sudo port install tesseract tesseract-eng`.
   Install Python dependencies with `python -m pip install -r requirements.txt`.
+  Local OCR tries a centered, enlarged display crop with grayscale and thresholded
+  variants, then retries the full photo if needed.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
   are also detected automatically.
@@ -364,10 +409,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
   quick date presets or custom inclusive start/end dates. Bosses can review
   seeded demo employees and records.
 - Boss accounts can use the separate **New fill** dashboard tab to record fuel
-  for their Admin-assigned vehicle. It reuses the employee photo-verification
-  and mileage workflow; fuel entry remains unavailable until a vehicle is
-  assigned and the meter readings are verified. Admin executive view remains
-  focused on fleet management.
+  for an assigned vehicle or find another active vehicle by registration number.
+  The registration field suggests active vehicle numbers on focus and filters
+  suggestions as the Boss types. It reuses the employee photo-verification and
+  mileage workflow; meter readings must be verified before submission. Admin
+  executive view remains focused on fleet management.
 - Migration `0013_company_personal_vehicles` classifies existing vehicles as
   company vehicles by default. Admins can mark a newly registered vehicle as
   personal in either Registry form. Bosses can also assign an unclaimed
@@ -493,3 +539,26 @@ password. These
 credentials and generated records are for local testing only; do not use them
 outside local development. Fuel history is returned only for the authenticated
 employee, and the session cookie is revoked on logout.
+
+## One-time production data reset
+
+For a destructive, one-time reset of the deployed app, run this command from
+the Render Shell (not from a deploy/start command):
+
+```bash
+python -m backend.app.cli reset-production-data
+```
+
+The command only runs when `FUEL_ENV=production`, the configured database is
+PostgreSQL, R2 storage is enabled, and exactly one admin account exists. It
+deletes all application data except that admin account, including other
+accounts, vehicles, fuel and meter history, sessions, and R2 meter photos.
+The database schema and migration history remain in place; the admin must sign
+in again. It requires typing `RESET <admin-email>` and never runs automatically
+during deployment. Confirm the displayed PostgreSQL database name and type
+`RESET <admin-email> <database-name>` when prompted.
+
+Pause app activity before running it to avoid concurrent writes. The reset is
+irreversible; take a database backup first if you may need the data later. R2
+photos are deleted before database rows, so if photo or database deletion
+fails, retry the command after reviewing its output.

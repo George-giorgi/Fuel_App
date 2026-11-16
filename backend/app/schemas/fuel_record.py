@@ -52,3 +52,4 @@ class FuelRecordCreate(BaseModel):
 
     meter_photo_id: int = Field(gt=0)
     odometer_miles: float = Field(ge=0, allow_inf_nan=False)
+    vehicle_id: int | None = Field(default=None, gt=0)

@@ -97,6 +97,40 @@ export function identifyVehicle(registrationNumber) {
   );
 }
 
+export async function getVehicleRegistrationSuggestions(search = '') {
+  const query = new URLSearchParams();
+  if (search.trim()) query.set('search', search.trim());
+  const suffix = query.toString() ? `?${query}` : '';
+  try {
+    return await apiRequest(`/api/vehicles/suggestions${suffix}`);
+  } catch (requestError) {
+    if (requestError.status !== 404) throw requestError;
+
+    const result = await getExecutiveVehicles({
+      page: 1,
+      page_size: 100,
+      search,
+      sort_by: 'registration',
+      sort_order: 'asc',
+      status: 'active'
+    });
+    const normalizedSearch = search.trim().toUpperCase();
+    return result.items
+      .map((vehicle) => vehicle.registrationNumber)
+      .filter((registrationNumber) =>
+        registrationNumber.toUpperCase().includes(normalizedSearch)
+      )
+      .sort((first, second) => {
+        const firstPrefix = first.toUpperCase().startsWith(normalizedSearch);
+        const secondPrefix = second.toUpperCase().startsWith(normalizedSearch);
+        return (
+          Number(secondPrefix) - Number(firstPrefix) ||
+          first.localeCompare(second)
+        );
+      });
+  }
+}
+
 export function createEmployee(employee) {
   return apiRequest('/api/admin/employees', {
     method: 'POST',
@@ -234,8 +268,13 @@ export function startQrSession(qrPayload) {
   });
 }
 
-export function startMeterPhotoSession() {
-  return apiRequest('/api/meter-photos/sessions', { method: 'POST' });
+export function startMeterPhotoSession(vehicleId = null) {
+  return apiRequest('/api/meter-photos/sessions', {
+    method: 'POST',
+    ...(vehicleId != null
+      ? { body: JSON.stringify({ vehicle_id: vehicleId }) }
+      : {})
+  });
 }
 
 export function uploadMeterPhoto(sessionToken, photo) {

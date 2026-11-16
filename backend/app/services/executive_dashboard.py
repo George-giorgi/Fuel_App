@@ -387,7 +387,7 @@ def list_executive_employees(
             select(Employee)
             .options(selectinload(Employee.vehicles))
             .where(*conditions)
-            .order_by(Employee.name.collate("NOCASE"), Employee.id)
+            .order_by(func.lower(Employee.name), Employee.id)
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()

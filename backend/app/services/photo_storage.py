@@ -158,3 +158,31 @@ def read_photo(storage_key: str) -> bytes | None:
         raise PhotoStorageError("Could not read the stored meter photo from R2.") from error
     finally:
         body.close()
+
+
+def delete_photo(storage_key: str) -> None:
+    if not storage_key or Path(storage_key).name != storage_key:
+        raise PhotoStorageError("The stored meter photo reference is invalid.")
+
+    if get_photo_storage_backend() == "local":
+        directory = METER_PHOTO_DIRECTORY.resolve()
+        path = (directory / storage_key).resolve()
+        if path.parent != directory:
+            raise PhotoStorageError("The stored meter photo reference is invalid.")
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            raise PhotoStorageError("Could not delete the stored meter photo.") from error
+        return
+
+    try:
+        response = _r2_client().delete_object(
+            Bucket=_r2_bucket_name(),
+            Key=storage_key,
+        )
+    except (BotoCoreError, ClientError, OSError) as error:
+        raise PhotoStorageError("Could not delete the stored meter photo from R2.") from error
+
+    status_code = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    if status_code is not None and not 200 <= status_code < 300:
+        raise PhotoStorageError("R2 did not confirm that the meter photo was deleted.")
