@@ -97,14 +97,14 @@ def start_qr_session(
 
 
 @router.post("/api/meter-photos", response_model=MeterPhotoRead, status_code=201)
-async def upload_meter_photo(
+def upload_meter_photo(
     session_token: Annotated[str, Form(min_length=1, max_length=128)],
     photo: Annotated[UploadFile, File()],
     response: Response,
     session: Annotated[Session, Depends(get_db_session)],
     employee: Annotated[Employee, Depends(get_current_employee)],
 ) -> MeterPhotoRead:
-    content = await photo.read(MAX_METER_PHOTO_BYTES + 1)
+    content = photo.file.read(MAX_METER_PHOTO_BYTES + 1)
     if len(content) > MAX_METER_PHOTO_BYTES:
         raise HTTPException(
             status_code=413, detail="Meter photos must be 10 MB or smaller."
