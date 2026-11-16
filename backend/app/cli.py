@@ -5,12 +5,21 @@ import sys
 from pathlib import Path
 
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from backend.app.core.config import METER_PHOTO_DIRECTORY
+from backend.app.db.base import Base
 from backend.app.db.session import SessionLocal, engine
+from backend.app.models import Employee, MeterPhoto
 from backend.app.services.auth import bootstrap_admin
+from backend.app.services.application_reset import reset_application_data
 from backend.app.services.demo_data import reset_demo_data, seed_demo_data
+from backend.app.services.photo_storage import (
+    PhotoStorageError,
+    delete_photo,
+    validate_photo_storage_configuration,
+)
 
 
 def bootstrap_first_admin() -> int:
@@ -119,11 +128,122 @@ def reset_local_demo_data() -> int:
     return 0
 
 
+def reset_production_data() -> int:
+    if os.environ.get("FUEL_ENV", "").strip().lower() != "production":
+        print(
+            "Production reset requires FUEL_ENV=production.",
+            file=sys.stderr,
+        )
+        return 2
+    if engine.dialect.name != "postgresql":
+        print(
+            "Production reset requires the PostgreSQL database configured by "
+            "DATABASE_URL.",
+            file=sys.stderr,
+        )
+        return 2
+    if os.environ.get("FUEL_PHOTO_STORAGE", "").strip().lower() != "r2":
+        print(
+            "Production reset requires FUEL_PHOTO_STORAGE=r2.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        validate_photo_storage_configuration()
+        with SessionLocal() as session:
+            administrators = list(
+                session.scalars(
+                    select(Employee).where(Employee.role == "admin")
+                ).all()
+            )
+            if len(administrators) != 1:
+                print(
+                    "Reset cancelled: exactly one admin account must exist.",
+                    file=sys.stderr,
+                )
+                return 2
+            admin_email = administrators[0].email
+            row_counts = {}
+            for table in Base.metadata.sorted_tables:
+                query = select(func.count()).select_from(table)
+                if table.name == Employee.__tablename__:
+                    query = query.where(table.c.role != "admin")
+                row_counts[table.name] = int(session.scalar(query) or 0)
+            photo_keys = list(
+                session.scalars(select(MeterPhoto.storage_key)).all()
+            )
+    except (PhotoStorageError, SQLAlchemyError) as error:
+        print(f"Could not inspect production data: {error}", file=sys.stderr)
+        return 1
+
+    total_rows = sum(row_counts.values())
+    database_name = engine.url.database or "unknown"
+    print(
+        f"This will delete {total_rows} application rows and "
+        f"{len(photo_keys)} R2 meter photos."
+    )
+    print(f"PostgreSQL database: {engine.url.host}/{database_name}")
+    print(f"It will preserve the admin account {admin_email!r}.")
+    print(
+        "All other accounts, vehicles, records, readings, and sessions will "
+        "be deleted."
+    )
+    print("Pause app activity before continuing; this reset does not stop writes.")
+    print("No backup is created by this command.")
+    try:
+        confirmation = input(
+            f"Type RESET {admin_email} {database_name} to continue: "
+        ).strip()
+    except EOFError:
+        confirmation = ""
+    if confirmation != f"RESET {admin_email} {database_name}":
+        print("Production reset cancelled.")
+        return 2
+
+    failed_photos = []
+    for storage_key in photo_keys:
+        try:
+            delete_photo(storage_key)
+        except PhotoStorageError as error:
+            failed_photos.append((storage_key, error))
+    if failed_photos:
+        print(
+            "Reset stopped before database deletion because some R2 photos "
+            "could not be deleted. Re-run the command to retry.",
+            file=sys.stderr,
+        )
+        for storage_key, error in failed_photos:
+            print(f"{storage_key}: {error}", file=sys.stderr)
+        return 1
+
+    try:
+        with SessionLocal.begin() as session:
+            reset_application_data(session)
+    except (ValueError, SQLAlchemyError) as error:
+        print(
+            "R2 photo cleanup completed, but the database reset failed. "
+            f"Re-run the command to retry the database reset: {error}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(
+        "Production data reset complete. The admin account and database schema "
+        "were preserved; sign in again because sessions were cleared."
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Diesel Desk local administration")
     parser.add_argument(
         "command",
-        choices=["bootstrap-admin", "seed-demo-data", "reset-demo-data"],
+        choices=[
+            "bootstrap-admin",
+            "seed-demo-data",
+            "reset-demo-data",
+            "reset-production-data",
+        ],
     )
     args = parser.parse_args()
     if args.command == "bootstrap-admin":
@@ -132,6 +252,8 @@ def main() -> int:
         return seed_local_demo_data()
     if args.command == "reset-demo-data":
         return reset_local_demo_data()
+    if args.command == "reset-production-data":
+        return reset_production_data()
     return 2
 
 

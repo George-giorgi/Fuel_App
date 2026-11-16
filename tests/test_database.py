@@ -18,6 +18,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
+from backend.app.cli import reset_production_data
 from backend.app.api.routers.auth import login as login_endpoint
 from backend.app.api.routers.auth import logout as logout_endpoint
 from backend.app.api.routers.admin import (
@@ -135,6 +136,7 @@ from backend.app.services.admin_dashboard import (
     list_admin_employees,
     list_employee_fuel_records,
 )
+from backend.app.services.application_reset import reset_application_data
 from backend.app.services.vehicles import (
     create_vehicle,
     identify_vehicle,
@@ -169,6 +171,110 @@ class DatabaseTests(unittest.TestCase):
             "bob",
             "zoe",
         ])
+
+    def test_application_reset_preserves_admin_and_clears_all_app_data(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            admin = bootstrap_admin(
+                session, "admin@example.com", "Admin", "admin-password-123"
+            )
+            employee = create_employee(
+                session, "employee@example.com", "Employee", "employee-password-123"
+            )
+            vehicle = create_vehicle(session, "AB12 CDE")
+            employee.vehicles.append(vehicle)
+            session.flush()
+
+            qr_session = QrSession(
+                token_hash="a" * 64,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                created_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+            session.add(qr_session)
+            session.flush()
+            photo_key = "meter-photo-test.jpg"
+            photo = MeterPhoto(
+                qr_session_id=qr_session.id,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                storage_key=photo_key,
+                content_type="image/jpeg",
+                size_bytes=1,
+                sha256="b" * 64,
+                uploaded_at=datetime.now(timezone.utc),
+            )
+            session.add(photo)
+            session.flush()
+            session.add(
+                FuelRecord(
+                    reg_number=vehicle.registration_number,
+                    fuel_type="Diesel",
+                    first_name="Employee",
+                    surname="Test",
+                    mileage_miles=100,
+                    capacity=60,
+                    litres=20,
+                    employee_id=employee.id,
+                    vehicle_id=vehicle.id,
+                    meter_photo_id=photo.id,
+                )
+            )
+            session.flush()
+
+            photo_keys = reset_application_data(session)
+
+            self.assertEqual(photo_keys, [photo_key])
+            self.assertEqual(admin.role, "admin")
+
+        with Session(self.engine) as session:
+            employees = list(session.scalars(select(Employee)))
+            self.assertEqual(
+                [(employee.email, employee.role) for employee in employees],
+                [("admin@example.com", "admin")],
+            )
+            for table in Base.metadata.sorted_tables:
+                if table.name == Employee.__tablename__:
+                    continue
+                self.assertEqual(
+                    session.scalar(select(func.count()).select_from(table)),
+                    0,
+                    table.name,
+                )
+
+    def test_application_reset_refuses_to_run_without_one_admin(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            create_employee(
+                session, "employee@example.com", "Employee", "employee-password-123"
+            )
+
+        with Session(self.engine) as session:
+            with self.assertRaisesRegex(ValueError, "exactly one administrator"):
+                reset_application_data(session)
+            employees = list(session.scalars(select(Employee)))
+
+        self.assertEqual(len(employees), 1)
+
+    def test_production_reset_command_refuses_non_production_environment(self) -> None:
+        with patch.dict(os.environ, {"FUEL_ENV": "development"}, clear=True):
+            with patch("builtins.input") as input_mock:
+                result = reset_production_data()
+
+        self.assertEqual(result, 2)
+        input_mock.assert_not_called()
+
+    def test_production_reset_command_refuses_sqlite_database(self) -> None:
+        fake_engine = MagicMock()
+        fake_engine.dialect.name = "sqlite"
+        with (
+            patch.dict(os.environ, {"FUEL_ENV": "production"}, clear=True),
+            patch("backend.app.cli.engine", fake_engine),
+            patch("builtins.input") as input_mock,
+        ):
+            result = reset_production_data()
+
+        self.assertEqual(result, 2)
+        input_mock.assert_not_called()
 
     def _create_verified_meter_photo(
         self,

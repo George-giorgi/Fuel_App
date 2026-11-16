@@ -493,3 +493,26 @@ password. These
 credentials and generated records are for local testing only; do not use them
 outside local development. Fuel history is returned only for the authenticated
 employee, and the session cookie is revoked on logout.
+
+## One-time production data reset
+
+For a destructive, one-time reset of the deployed app, run this command from
+the Render Shell (not from a deploy/start command):
+
+```bash
+python -m backend.app.cli reset-production-data
+```
+
+The command only runs when `FUEL_ENV=production`, the configured database is
+PostgreSQL, R2 storage is enabled, and exactly one admin account exists. It
+deletes all application data except that admin account, including other
+accounts, vehicles, fuel and meter history, sessions, and R2 meter photos.
+The database schema and migration history remain in place; the admin must sign
+in again. It requires typing `RESET <admin-email>` and never runs automatically
+during deployment. Confirm the displayed PostgreSQL database name and type
+`RESET <admin-email> <database-name>` when prompted.
+
+Pause app activity before running it to avoid concurrent writes. The reset is
+irreversible; take a database backup first if you may need the data later. R2
+photos are deleted before database rows, so if photo or database deletion
+fails, retry the command after reviewing its output.
