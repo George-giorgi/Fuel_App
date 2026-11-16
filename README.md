@@ -90,9 +90,12 @@ imported. The Render start command applies schema-only Alembic upgrades.
   the HttpOnly session cookie on the Pages domain instead of relying on
   cross-site cookies. Keep `VITE_API_BASE_URL` empty for this setup.
 - **Render:** create the backend Web Service from this branch using
-  [`render.yaml`](./render.yaml). The service installs Tesseract and starts
-  with `python -m alembic upgrade head` before Uvicorn. Configure every
-  `sync: false` variable in Render's environment settings.
+  [`render.yaml`](./render.yaml). Production OCR uses Google Cloud Vision;
+  configure `GOOGLE_CLOUD_VISION_API_KEY` as a secret in Render. The Docker
+  image also installs Tesseract for local or explicitly selected Tesseract
+  deployments. The service starts with `python -m alembic upgrade head` before
+  Uvicorn. Configure every `sync: false` variable in Render's environment
+  settings.
 - **CORS:** set `FUEL_CORS_ORIGINS` on Render to the exact production Pages
   origin (for example `https://diesel-desk.pages.dev`), without a trailing
   slash. Do not use a wildcard or a preview URL for production.
@@ -113,8 +116,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
   pass through authenticated API endpoints. Do not configure an object
   lifecycle rule that deletes fuel photos.
 - **Secrets:** put database credentials, R2 credentials, `FUEL_AUTH_SECRET`,
-  and any optional Google Vision key only in Render's backend environment.
-  Never prefix a secret with `VITE_`. Pages needs only `API_ORIGIN`.
+  and `GOOGLE_CLOUD_VISION_API_KEY` only in Render's backend environment. For
+  an existing manually created Render service, set
+  `FUEL_OCR_PROVIDER=google_vision` and add a restricted Vision API key there,
+  then redeploy. Never prefix a secret with `VITE_`. Pages needs only
+  `API_ORIGIN`.
 - **Administrator:** after Render has applied migrations, bootstrap the first
   admin once from a trusted local shell using the production Neon URL and the
   existing `python -m backend.app.cli bootstrap-admin` command. It prompts for

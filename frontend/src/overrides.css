@@ -3312,6 +3312,24 @@ footer {
     overflow: visible;
   }
 
+  .admin-app-shell .sidebar nav {
+    display: block;
+  }
+
+  .admin-app-shell .admin-sidebar-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+  }
+
+  .admin-app-shell .sidebar nav .admin-sidebar-tabs button {
+    width: 100%;
+    min-width: 0;
+    padding: 9px 8px;
+    white-space: normal;
+  }
+
   .sidebar nav a {
     padding: 10px 8px;
   }
@@ -7354,6 +7372,11 @@ footer {
   color: var(--ink);
   font-size: 12px;
   transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.admin-registry-panel .admin-registry-form input:not([type='checkbox']):not([type='radio']) {
+  width: 100%;
+  min-width: 0;
 }
 
 .admin-registry-panel .admin-registry-form select {
