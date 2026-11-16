@@ -294,9 +294,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
 
   Keep the key out of source control and the frontend; restrict it to the Vision
   API and your backend's use. In this mode, each meter photo is sent from FastAPI
-  to Google as three OCR images (the full display and two digit-row crops),
-  consuming three text/document-text detection units. Google lists the first
-  1,000 Vision units per month as free; review the
+  to Google as three OCR images (the full display and two digit-row crops). When
+  the TOTAL crop is unreadable or low-confidence, the backend uses Vision's
+  detected word bounds to crop and enlarge that exact row for a fourth pass.
+  Google lists the first 1,000 Vision units per month as free; review the
   [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
   alerts, and get approval before sending company photos.
   Local development automatically uses Google Vision when

@@ -1424,6 +1424,21 @@ class DatabaseTests(unittest.TestCase):
             variant_response.__enter__.return_value.read.return_value = json.dumps(
                 response_data
             ).encode()
+            detected_response = MagicMock()
+            detected_response.__enter__.return_value.read.return_value = json.dumps(
+                {
+                    "responses": [
+                        {
+                            "fullTextAnnotation": vision_document(
+                                [
+                                    vision_word("26", 10, 50, 0.96),
+                                    vision_word("1563", 40, 50, 0.96),
+                                ]
+                            )
+                        }
+                    ]
+                }
+            ).encode()
             with (
                 patch.dict(
                     os.environ,
@@ -1434,7 +1449,7 @@ class DatabaseTests(unittest.TestCase):
                 ),
                 patch(
                     "backend.app.services.meter_ocr.urlopen",
-                    return_value=variant_response,
+                    side_effect=[variant_response, detected_response],
                 ),
             ):
                 return extract_meter_readings(image.getvalue())
@@ -1452,8 +1467,9 @@ class DatabaseTests(unittest.TestCase):
             "2615631",
             0.65,
         )
-        self.assertEqual(low_confidence_total.status, "uncertain")
-        self.assertEqual(low_confidence_total.cumulative_total_confidence, 65.0)
+        self.assertEqual(low_confidence_total.status, "ready")
+        self.assertEqual(low_confidence_total.cumulative_total_litres, 26.1563)
+        self.assertEqual(low_confidence_total.cumulative_total_confidence, 96.0)
 
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
         image = BytesIO()

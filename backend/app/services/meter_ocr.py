@@ -252,6 +252,135 @@ def _prepare_google_vision_row_image(
     return prepared.getvalue()
 
 
+def _google_vision_bottom_numeric_row_bounds(
+    document: dict[str, object],
+) -> tuple[int, int, int, int] | None:
+    words = []
+    pages = document.get("pages", [])
+    if not isinstance(pages, list):
+        return None
+    for page in pages:
+        if not isinstance(page, dict):
+            continue
+        blocks = page.get("blocks", [])
+        if not isinstance(blocks, list):
+            continue
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            paragraphs = block.get("paragraphs", [])
+            if not isinstance(paragraphs, list):
+                continue
+            for paragraph in paragraphs:
+                if not isinstance(paragraph, dict):
+                    continue
+                paragraph_words = paragraph.get("words", [])
+                if not isinstance(paragraph_words, list):
+                    continue
+                for word in paragraph_words:
+                    if not isinstance(word, dict):
+                        continue
+                    symbols = word.get("symbols", [])
+                    if not isinstance(symbols, list):
+                        continue
+                    text = "".join(
+                        str(symbol.get("text", ""))
+                        for symbol in symbols
+                        if isinstance(symbol, dict)
+                    )
+                    if not any(character.isdigit() for character in text):
+                        continue
+                    bounding_box = word.get("boundingBox", {})
+                    if not isinstance(bounding_box, dict):
+                        continue
+                    vertices = bounding_box.get("vertices", [])
+                    if not isinstance(vertices, list):
+                        continue
+                    coordinates = [
+                        (float(vertex.get("x", 0)), float(vertex.get("y", 0)))
+                        for vertex in vertices
+                        if isinstance(vertex, dict)
+                    ]
+                    if not coordinates:
+                        continue
+                    left = min(point[0] for point in coordinates)
+                    top = min(point[1] for point in coordinates)
+                    right = max(point[0] for point in coordinates)
+                    bottom = max(point[1] for point in coordinates)
+                    center = (top + bottom) / 2
+                    height = max(bottom - top, 1.0)
+                    words.append((center, left, top, right, bottom, height))
+
+    lines: list[dict[str, object]] = []
+    for word in sorted(words, key=lambda item: (item[0], item[1])):
+        center, left, top, right, bottom, height = word
+        line = next(
+            (
+                item
+                for item in lines
+                if abs(center - float(item["center"]))
+                <= max(8.0, min(height, float(item["height"])) * 0.55)
+            ),
+            None,
+        )
+        if line is None:
+            line = {
+                "center": center,
+                "height": height,
+                "words": [],
+            }
+            lines.append(line)
+        line_words = line["words"]
+        line_words.append(word)
+        line["center"] = sum(item[0] for item in line_words) / len(line_words)
+
+    if len(lines) < 2:
+        return None
+    bottom_line = max(lines, key=lambda line: float(line["center"]))
+    numeric_words = bottom_line["words"]
+    left = min(word[1] for word in numeric_words)
+    top = min(word[2] for word in numeric_words)
+    right = max(word[3] for word in numeric_words)
+    bottom = max(word[4] for word in numeric_words)
+    return round(left), round(top), round(right), round(bottom)
+
+
+def _prepare_google_vision_detected_row_image(
+    display_content: bytes,
+    document: dict[str, object],
+) -> bytes | None:
+    bounds = _google_vision_bottom_numeric_row_bounds(document)
+    if bounds is None:
+        return None
+
+    with Image.open(BytesIO(display_content)) as source:
+        image = ImageOps.exif_transpose(source).convert("L")
+    left, top, right, bottom = bounds
+    row_height = max(bottom - top, 1)
+    horizontal_padding = max(16, round(row_height * 0.75))
+    vertical_padding = max(12, round(row_height * 0.45))
+    crop_bounds = (
+        max(0, left - horizontal_padding),
+        max(0, top - vertical_padding),
+        min(image.width, right + horizontal_padding),
+        min(image.height, bottom + vertical_padding),
+    )
+    if crop_bounds[2] <= crop_bounds[0] or crop_bounds[3] <= crop_bounds[1]:
+        return None
+
+    image = ImageOps.autocontrast(image.crop(crop_bounds), cutoff=1)
+    image = image.filter(ImageFilter.UnsharpMask(radius=2, percent=180, threshold=2))
+    if image.width < _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH:
+        scale = _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH / image.width
+        image = image.resize(
+            (_GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH, round(image.height * scale)),
+            Image.Resampling.LANCZOS,
+        )
+    prepared = BytesIO()
+    image.save(prepared, format="JPEG", quality=98)
+    return prepared.getvalue()
+
+
 def _google_vision_word_lines(
     document: dict[str, object],
     *,
@@ -432,52 +561,19 @@ def _parse_google_vision_response(response_data: object) -> MeterOcrResult:
     return parse_meter_ocr_data(data)
 
 
-def _extract_google_vision_readings(
-    content: bytes,
+def _call_google_vision(
+    images: list[bytes],
     api_key: str,
-) -> MeterOcrResult:
-    try:
-        display_content = _prepare_google_vision_image(content)
-        current_row_content = _prepare_google_vision_row_image(
-            content,
-            _GOOGLE_VISION_CURRENT_ROW_CROP,
-            _GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH,
-        )
-        total_row_content = _prepare_google_vision_row_image(
-            content,
-            _GOOGLE_VISION_TOTAL_ROW_CROP,
-            _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
-        )
-    except (OSError, ValueError, Image.DecompressionBombError):
-        return MeterOcrResult(
-            status="failed",
-            message="Could not prepare this photo for Google Vision. Retake it and try again.",
-        )
-
+) -> object | MeterOcrResult:
     url = f"{_GOOGLE_VISION_ENDPOINT}?{urlencode({'key': api_key})}"
     request_body = json.dumps(
         {
             "requests": [
                 {
-                    "image": {
-                        "content": base64.b64encode(display_content).decode("ascii")
-                    },
-                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
-                },
-                {
-                    "image": {
-                        "content": base64.b64encode(current_row_content).decode(
-                            "ascii"
-                        )
-                    },
-                    "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
-                },
-                {
-                    "image": {
-                        "content": base64.b64encode(total_row_content).decode("ascii")
-                    },
+                    "image": {"content": base64.b64encode(image).decode("ascii")},
                     "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
                 }
+                for image in images
             ]
         }
     ).encode("utf-8")
@@ -489,7 +585,7 @@ def _extract_google_vision_readings(
     )
     try:
         with urlopen(request, timeout=_GOOGLE_VISION_TIMEOUT_SECONDS) as response:
-            response_data = json.loads(response.read())
+            return json.loads(response.read())
     except HTTPError as error:
         return MeterOcrResult(
             status="failed",
@@ -513,6 +609,36 @@ def _extract_google_vision_readings(
             status="failed",
             message="Google Vision returned an invalid response.",
         )
+
+
+def _extract_google_vision_readings(
+    content: bytes,
+    api_key: str,
+) -> MeterOcrResult:
+    try:
+        display_content = _prepare_google_vision_image(content)
+        current_row_content = _prepare_google_vision_row_image(
+            content,
+            _GOOGLE_VISION_CURRENT_ROW_CROP,
+            _GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH,
+        )
+        total_row_content = _prepare_google_vision_row_image(
+            content,
+            _GOOGLE_VISION_TOTAL_ROW_CROP,
+            _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
+        )
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return MeterOcrResult(
+            status="failed",
+            message="Could not prepare this photo for Google Vision. Retake it and try again.",
+        )
+
+    response_data = _call_google_vision(
+        [display_content, current_row_content, total_row_content],
+        api_key,
+    )
+    if isinstance(response_data, MeterOcrResult):
+        return response_data
 
     if not isinstance(response_data, dict):
         return MeterOcrResult(
@@ -587,28 +713,82 @@ def _extract_google_vision_readings(
         )
 
     total_response = responses[2]
-    api_error = total_response.get("error")
-    if isinstance(api_error, dict):
-        message = api_error.get("message", "The OCR request was rejected.")
-        return MeterOcrResult(
-            status="failed",
-            message=f"Google Vision error reading the cumulative row: {message}",
-        )
+    total_error = total_response.get("error")
     total_document = total_response.get("fullTextAnnotation")
-    if not isinstance(total_document, dict):
-        return MeterOcrResult(
-            status="uncertain",
-            current_fill_litres=display_result.current_fill_litres,
-            current_fill_confidence=display_result.current_fill_confidence,
-            message="Google Vision could not read the PIUSI TOTAL row. Retake the photo.",
+    total_readings = (
+        _google_vision_word_lines(
+            total_document,
+            infer_decimal_from_word_groups=True,
+            decimal_places_by_row=(4,),
         )
-
-    total_readings = _google_vision_word_lines(
-        total_document,
-        infer_decimal_from_word_groups=True,
-        decimal_places_by_row=(4,),
+        if isinstance(total_document, dict)
+        else []
     )
+    if (
+        (not total_readings or total_readings[0][2] < _GOOGLE_VISION_MIN_CONFIDENCE)
+        and isinstance(display_document, dict)
+    ):
+        try:
+            detected_row_content = _prepare_google_vision_detected_row_image(
+                display_content,
+                display_document,
+            )
+        except (OSError, ValueError, Image.DecompressionBombError):
+            detected_row_content = None
+        if detected_row_content is not None:
+            detected_response_data = _call_google_vision(
+                [detected_row_content],
+                api_key,
+            )
+            if isinstance(detected_response_data, MeterOcrResult):
+                return detected_response_data
+            detected_responses = (
+                detected_response_data.get("responses")
+                if isinstance(detected_response_data, dict)
+                else None
+            )
+            if (
+                not isinstance(detected_responses, list)
+                or not detected_responses
+                or not isinstance(detected_responses[0], dict)
+            ):
+                return MeterOcrResult(
+                    status="failed",
+                    message="Google Vision returned no detected-row OCR response.",
+                )
+            detected_result = detected_responses[0]
+            detected_error = detected_result.get("error")
+            if isinstance(detected_error, dict):
+                message = detected_error.get(
+                    "message", "The OCR request was rejected."
+                )
+                return MeterOcrResult(
+                    status="failed",
+                    message=f"Google Vision error reading the detected TOTAL row: {message}",
+                )
+            detected_document = detected_result.get("fullTextAnnotation")
+            detected_readings = (
+                _google_vision_word_lines(
+                    detected_document,
+                    infer_decimal_from_word_groups=True,
+                    decimal_places_by_row=(4,),
+                )
+                if isinstance(detected_document, dict)
+                else []
+            )
+            if detected_readings and (
+                not total_readings
+                or detected_readings[0][2] > total_readings[0][2]
+            ):
+                total_readings = detected_readings
+
     if not total_readings:
+        if isinstance(total_error, dict):
+            message = total_error.get("message", "The OCR request was rejected.")
+            return MeterOcrResult(
+                status="failed",
+                message=f"Google Vision error reading the cumulative row: {message}",
+            )
         return MeterOcrResult(
             status="uncertain",
             current_fill_litres=display_result.current_fill_litres,
