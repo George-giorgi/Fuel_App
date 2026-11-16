@@ -20,6 +20,7 @@ from backend.app.repositories.vehicles import get_vehicle_by_id
 from backend.app.repositories.meter_photos import get_meter_photo_by_id
 from backend.app.schemas.meter_photo import (
     MeterPhotoRead,
+    MeterPhotoSessionCreate,
     MeterPhotoSessionRead,
     MeterPhotoVerify,
     QrSessionCreate,
@@ -30,7 +31,7 @@ from backend.app.services.meter_photos import (
     InvalidMeterPhoto,
     InvalidQrSession,
     UnsupportedMeterPhotoType,
-    create_assigned_vehicle_photo_session,
+    create_vehicle_photo_session,
     create_qr_session,
     store_meter_photo,
     verify_meter_photo,
@@ -47,16 +48,21 @@ router = APIRouter(tags=["meter photos"])
     response_model=MeterPhotoSessionRead,
     status_code=201,
 )
-def start_assigned_vehicle_photo_session(
+def start_vehicle_photo_session(
     response: Response,
     session: Annotated[Session, Depends(get_db_session)],
     employee: Annotated[Employee, Depends(get_current_employee)],
+    request: MeterPhotoSessionCreate | None = None,
 ) -> MeterPhotoSessionRead:
-    created = create_assigned_vehicle_photo_session(session, employee)
+    created = create_vehicle_photo_session(
+        session,
+        employee,
+        request.vehicle_id if request is not None else None,
+    )
     if created is None:
         raise HTTPException(
             status_code=404,
-            detail="No assigned vehicle is available for meter photo capture.",
+            detail="Vehicle not found or unavailable for meter photo capture.",
         )
     session_token, registration_number, expires_at = created
     response.headers["Cache-Control"] = "no-store"

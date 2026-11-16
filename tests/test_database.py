@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import asyncio
@@ -29,6 +30,7 @@ from backend.app.api.routers.admin import (
 )
 from backend.app.api.routers.meter_photos import (
     read_meter_photo_content as read_meter_photo_content_endpoint,
+    start_vehicle_photo_session as start_vehicle_photo_session_endpoint,
 )
 from backend.app.api.routers.fuel_records import read_fuel_records
 from backend.app.api.dependencies import (
@@ -41,6 +43,7 @@ from backend.app.api.routers.vehicles import (
     lookup_vehicle,
     my_vehicle,
     my_vehicle_fuel_records,
+    vehicle_registration_suggestions,
 )
 from backend.app.core.config import (
     SESSION_COOKIE_NAME,
@@ -79,7 +82,10 @@ from backend.app.schemas.admin_dashboard import (
     AdminFuelSummaryRead,
 )
 from backend.app.schemas.fuel_record import FuelRecordCreate, FuelRecordRead
-from backend.app.schemas.meter_photo import MeterPhotoVerify
+from backend.app.schemas.meter_photo import (
+    MeterPhotoSessionCreate,
+    MeterPhotoVerify,
+)
 from backend.app.services.fuel_records import (
     FuelSubmissionError,
     MeterPhotoNotOwned,
@@ -113,6 +119,7 @@ from backend.app.services.meter_photos import (
     UnsupportedMeterPhotoType,
     create_assigned_vehicle_photo_session,
     create_qr_session,
+    create_vehicle_photo_session,
     store_meter_photo,
     validate_meter_photo,
     verify_meter_photo,
@@ -1232,10 +1239,10 @@ class DatabaseTests(unittest.TestCase):
                                         "paragraphs": [
                                             {
                                                 "words": [
-                                                    vision_word("5", 10, 100, 0.94),
+                                                    vision_word("22", 10, 100, 0.94),
                                                     vision_word(".", 30, 100, 0.90),
-                                                    vision_word("00", 40, 100, 0.92),
-                                                    vision_word("9667.50", 10, 150, 0.96),
+                                                    vision_word("032", 40, 100, 0.92),
+                                                    vision_word("261563", 10, 150, 0.96),
                                                 ]
                                             }
                                         ]
@@ -1251,6 +1258,8 @@ class DatabaseTests(unittest.TestCase):
         response.__enter__.return_value.read.return_value = json.dumps(
             google_response
         ).encode()
+        image = BytesIO()
+        Image.new("RGB", (768, 1024), "white").save(image, format="JPEG")
         with (
             patch.dict(
                 os.environ,
@@ -1264,7 +1273,7 @@ class DatabaseTests(unittest.TestCase):
                 return_value=response,
             ) as urlopen_mock,
         ):
-            result = extract_meter_readings(b"test-image")
+            result = extract_meter_readings(image.getvalue())
 
         request = urlopen_mock.call_args.args[0]
         request_payload = json.loads(request.data)
@@ -1274,23 +1283,31 @@ class DatabaseTests(unittest.TestCase):
             request_payload["requests"][0]["features"],
             [{"type": "DOCUMENT_TEXT_DETECTION"}],
         )
-        self.assertEqual(
-            request_payload["requests"][0]["image"]["content"],
-            "dGVzdC1pbWFnZQ==",
+        prepared_image = Image.open(
+            BytesIO(
+                base64.b64decode(
+                    request_payload["requests"][0]["image"]["content"]
+                )
+            )
         )
+        self.assertEqual(prepared_image.width, 1200)
+        self.assertLess(prepared_image.height, 1024)
         self.assertEqual(result.status, "ready")
-        self.assertEqual(result.current_fill_litres, 5.0)
-        self.assertEqual(result.cumulative_total_litres, 9667.5)
+        self.assertEqual(result.current_fill_litres, 22.032)
+        self.assertEqual(result.cumulative_total_litres, 261563.0)
         self.assertEqual(result.current_fill_confidence, 93.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
+        image = BytesIO()
+        Image.new("RGB", (768, 1024), "white").save(image, format="JPEG")
+        image_content = image.getvalue()
         with patch.dict(
             os.environ,
             {"FUEL_OCR_PROVIDER": "google_vision"},
             clear=True,
         ):
-            missing_key = extract_meter_readings(b"test-image")
+            missing_key = extract_meter_readings(image_content)
 
         self.assertEqual(missing_key.status, "unavailable")
         self.assertIn("GOOGLE_CLOUD_VISION_API_KEY", missing_key.message)
@@ -1312,7 +1329,7 @@ class DatabaseTests(unittest.TestCase):
                 return_value=response,
             ),
         ):
-            api_error = extract_meter_readings(b"test-image")
+            api_error = extract_meter_readings(image_content)
 
         self.assertEqual(api_error.status, "failed")
         self.assertIn("API key invalid", api_error.message)
@@ -1395,6 +1412,119 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(response_data["cumulativeTotalLitres"], 105.05)
         self.assertEqual(response_data["mileageMiles"], 1100.0)
         self.assertEqual(response_data["currentOdometerMiles"], 1100.0)
+
+    def test_boss_can_find_and_record_a_fill_for_another_registered_vehicle(
+        self,
+    ) -> None:
+        image_buffer = BytesIO()
+        Image.new("RGB", (2, 2), color="white").save(image_buffer, format="PNG")
+
+        with Session(self.engine) as session, session.begin():
+            boss = create_employee(
+                session,
+                "fleet-boss@example.test",
+                "Fleet Boss",
+                "temporary-password",
+                role="boss",
+            )
+            assigned_driver = create_employee(
+                session,
+                "fleet-driver@example.test",
+                "Fleet Driver",
+                "temporary-password",
+            )
+            other_driver = create_employee(
+                session,
+                "other-driver@example.test",
+                "Other Driver",
+                "temporary-password",
+            )
+            vehicle = create_vehicle(session, "AB12 CDE")
+            vehicle.fuel_type = "Diesel"
+            vehicle.tank_capacity = 80
+            assigned_driver.vehicles.append(vehicle)
+            other_vehicle = create_vehicle(session, "XY34 ZZZ")
+            other_driver.vehicles.append(other_vehicle)
+
+            found_vehicle = lookup_vehicle(
+                "ab12 cde", session=session, employee=boss
+            )
+            self.assertEqual(found_vehicle.id, vehicle.id)
+            self.assertEqual(found_vehicle.registration_number, "AB12 CDE")
+
+            created_session = start_vehicle_photo_session_endpoint(
+                Response(),
+                session,
+                boss,
+                MeterPhotoSessionCreate(vehicle_id=found_vehicle.id),
+            )
+            session_token = created_session.session_token
+            self.assertEqual(
+                created_session.registration_number, vehicle.registration_number
+            )
+
+            with TemporaryDirectory() as upload_directory:
+                with (
+                    patch(
+                        "backend.app.services.photo_storage.METER_PHOTO_DIRECTORY",
+                        Path(upload_directory),
+                    ),
+                    patch(
+                        "backend.app.services.meter_photos.extract_meter_readings",
+                        return_value=MeterOcrResult(
+                            status="ready",
+                            current_fill_litres=10,
+                            cumulative_total_litres=10,
+                            current_fill_confidence=99,
+                            cumulative_total_confidence=99,
+                        ),
+                    ),
+                ):
+                    photo, _ = store_meter_photo(
+                        session,
+                        boss,
+                        session_token,
+                        image_buffer.getvalue(),
+                        "image/png",
+                    )
+
+            verified_photo = verify_meter_photo(session, boss, photo.id)
+            self.assertIsNotNone(verified_photo)
+            record = save_fuel_record(
+                session,
+                boss,
+                FuelRecordCreate(
+                    meter_photo_id=photo.id,
+                    odometer_miles=1000,
+                    vehicle_id=vehicle.id,
+                ),
+            )
+            self.assertEqual(record.vehicle_id, vehicle.id)
+            self.assertEqual(record.reg_number, "AB12 CDE")
+
+            with self.assertRaises(MeterPhotoNotOwned):
+                save_fuel_record(
+                    session,
+                    boss,
+                    FuelRecordCreate(
+                        meter_photo_id=photo.id,
+                        odometer_miles=1000,
+                        vehicle_id=other_vehicle.id,
+                    ),
+                )
+            self.assertIsNone(
+                create_vehicle_photo_session(session, other_driver, vehicle.id)
+            )
+            with self.assertRaisesRegex(FuelSubmissionError, "Only boss accounts"):
+                save_fuel_record(
+                    session,
+                    other_driver,
+                    FuelRecordCreate(
+                        meter_photo_id=photo.id,
+                        odometer_miles=1000,
+                        vehicle_id=vehicle.id,
+                    ),
+                )
 
     def test_demo_employee_fills_update_the_global_reading_and_history(self) -> None:
         with Session(self.engine) as session, session.begin():
@@ -2565,6 +2695,75 @@ class DatabaseTests(unittest.TestCase):
                 {record.vehicle_id for record in emma2_records}
             )
         )
+
+    def test_boss_vehicle_registration_suggestions_filter_active_vehicles(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            boss = create_employee(
+                session,
+                "vehicle-suggest-boss@example.test",
+                "Vehicle Suggest Boss",
+                "temporary-password",
+                role="boss",
+            )
+            employee = create_employee(
+                session,
+                "vehicle-suggest-employee@example.test",
+                "Vehicle Suggest Employee",
+                "temporary-password",
+            )
+            vehicles = [
+                create_vehicle(session, registration)
+                for registration in (
+                    "AB12 CDE",
+                    "XY12 ZZZ",
+                    "ZX99 ABC",
+                )
+            ]
+            vehicles[2].is_active = False
+
+            self.assertEqual(
+                vehicle_registration_suggestions(
+                    session=session, employee=boss, search=None
+                ),
+                ["AB12 CDE", "XY12 ZZZ"],
+            )
+            self.assertEqual(
+                vehicle_registration_suggestions(
+                    session=session, employee=boss, search="12"
+                ),
+                ["AB12 CDE", "XY12 ZZZ"],
+            )
+            self.assertEqual(
+                vehicle_registration_suggestions(
+                    session=session, employee=boss, search="ab%"
+                ),
+                [],
+            )
+            with self.assertRaises(HTTPException) as forbidden:
+                vehicle_registration_suggestions(
+                    session=session, employee=employee, search=None
+                )
+            self.assertEqual(forbidden.exception.status_code, 403)
+
+    def test_boss_vehicle_suggestions_prioritize_registration_prefixes(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            boss = create_employee(
+                session,
+                "vehicle-prefix-boss@example.test",
+                "Vehicle Prefix Boss",
+                "temporary-password",
+                role="boss",
+            )
+            for index in range(12):
+                create_vehicle(session, f"A18MATCH{index:02d}")
+            create_vehicle(session, "182SO547")
+
+            suggestions = vehicle_registration_suggestions(
+                session=session, employee=boss, search="18"
+            )
+
+        self.assertEqual(suggestions[0], "182SO547")
+        self.assertIn("182SO547", suggestions)
 
     def test_assigned_vehicle_lookup_hides_other_employees_vehicle(self) -> None:
         with Session(self.engine) as session, session.begin():

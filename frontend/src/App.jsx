@@ -20,6 +20,8 @@ import {
   getNctAlerts,
   getVehicleFuelRecords,
   getVehicleNctList,
+  getVehicleRegistrationSuggestions,
+  identifyVehicle,
   login,
   logout,
   provisionVehicleQr,
@@ -36,7 +38,7 @@ import {
 
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 const SUBMISSION_NOTICE =
-  'Confirm both OCR values against the reading sheet before saving. Cumulative discrepancies remain visible for review.';
+  'Confirm both OCR values against the PIUSI display before saving. Cumulative discrepancies remain visible for review.';
 
 function Brand() {
   return (
@@ -369,7 +371,7 @@ function SessionRestoreScreen() {
   );
 }
 
-function MeterPhotoFlow({ onVerified }) {
+function MeterPhotoFlow({ onVerified, vehicleId }) {
   const videoRef = useRef(null);
   const [photo, setPhoto] = useState(null);
   const [pendingPhoto, setPendingPhoto] = useState(null);
@@ -487,7 +489,7 @@ function MeterPhotoFlow({ onVerified }) {
     setError('');
     setUploadStatus('Preparing secure photo upload...');
     try {
-      const uploadSession = await startMeterPhotoSession();
+      const uploadSession = await startMeterPhotoSession(vehicleId);
       setUploadStatus('Uploading the sheet and reading both values...');
       const uploadedPhoto = await uploadMeterPhoto(
         uploadSession.sessionToken,
@@ -540,20 +542,19 @@ function MeterPhotoFlow({ onVerified }) {
           <p className="eyebrow">METER VERIFICATION</p>
           <h4 className="meter-photo-title">
             <AppIcon name="meter" size={17} />
-            <span>Capture handwritten readings</span>
+            <span>Capture PIUSI meter display</span>
           </h4>
           <p className="meter-photo-copy">
-            On plain white paper, write both readings in large, clear digits with a
-            thick dark marker (not pencil). The first line is the current fill; the
-            second is the latest cumulative total. Labels are not needed. Make zeros
-            rounded and decimals clear.
+            Keep the display centered and close so both readings are visible. The
+            large top row is the current fill; the smaller row marked TOTAL is the
+            cumulative total. Keep the digits in focus and avoid glare.
           </p>
           <div
             className="reading-sheet-template"
-            aria-label="Reading order"
+            aria-label="PIUSI display reading order"
           >
-            <p><strong>First line:</strong> current fill in litres</p>
-            <p><strong>Second line:</strong> cumulative total in litres</p>
+            <p><strong>Large top row:</strong> current fill in litres</p>
+            <p><strong>Smaller TOTAL row:</strong> cumulative total in litres</p>
           </div>
         </div>
       </div>
@@ -573,7 +574,7 @@ function MeterPhotoFlow({ onVerified }) {
             <strong aria-live="polite">
               {openingCamera ? 'Opening camera...' : 'Open camera'}
             </strong>
-            <small>Capture both handwritten readings in one clear photo</small>
+            <small>Capture both PIUSI display readings in one clear photo</small>
           </span>
           <span className="camera-start-arrow" aria-hidden="true">-&gt;</span>
         </button>
@@ -588,8 +589,8 @@ function MeterPhotoFlow({ onVerified }) {
             aria-label="Live meter camera preview"
           />
           <p className="meter-photo-copy">
-            Move close so both lines fill most of the frame. Keep the paper flat and
-            in focus, use bright even light, and avoid shadows or glare.
+            Keep the display centered and close so both rows are readable. Hold the
+            camera steady, focus on the digits, and avoid reflections or glare.
           </p>
           <div className="meter-camera-actions">
             <button
@@ -617,7 +618,7 @@ function MeterPhotoFlow({ onVerified }) {
             <img
               className="meter-photo-preview"
               src={previewUrl}
-              alt="Captured handwritten meter readings preview"
+              alt="Captured PIUSI meter display preview"
             />
           )}
           <div className="meter-camera-actions">
@@ -705,7 +706,7 @@ function MeterPhotoFlow({ onVerified }) {
                 type="button"
                 onClick={startAnotherPhoto}
               >
-                Capture another reading sheet
+                Capture another meter photo
               </button>
             </div>
           ) : (
@@ -715,12 +716,12 @@ function MeterPhotoFlow({ onVerified }) {
               photo.ocrCumulativeTotalLitres != null ? (
                 <>
                   <p>
-                    Check these OCR readings against the sheet. If they do not match,
+                    Check these OCR readings against the PIUSI display. If they do not match,
                     retake the photo; readings cannot be typed or edited.
                   </p>
                   <label className="meter-confirmation">
                     <input type="checkbox" required />
-                    Both readings match the reading sheet.
+                    Both readings match the PIUSI display.
                   </label>
                   <button
                     className="primary-button"
@@ -764,17 +765,102 @@ function MeterPhotoFlow({ onVerified }) {
   );
 }
 
-function FuelForm({ vehicle, onRecordCreated }) {
+function FuelForm({
+  vehicle,
+  onRecordCreated,
+  allowVehicleSelection = false
+}) {
+  const [selectedVehicle, setSelectedVehicle] = useState(vehicle);
+  const [registrationSearch, setRegistrationSearch] = useState(
+    allowVehicleSelection ? '' : vehicle?.registrationNumber ?? ''
+  );
+  const [vehicleLookupLoading, setVehicleLookupLoading] = useState(false);
+  const [vehicleLookupError, setVehicleLookupError] = useState('');
+  const [vehicleSuggestions, setVehicleSuggestions] = useState([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState('');
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [meterPhoto, setMeterPhoto] = useState(null);
   const [odometer, setOdometer] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [flowKey, setFlowKey] = useState(0);
+  const activeVehicle = allowVehicleSelection ? selectedVehicle : vehicle;
   const readingsVerified = Boolean(meterPhoto?.verifiedAt);
+  const activeVehicleDetails = activeVehicle
+    ? [activeVehicle.make, activeVehicle.model].filter(Boolean).join(' ')
+    : '';
   const odometerBelowPrevious =
-    vehicle?.lastRecordedOdometerMiles != null &&
+    activeVehicle?.lastRecordedOdometerMiles != null &&
     odometer !== '' &&
-    Number(odometer) < vehicle.lastRecordedOdometerMiles;
+    Number(odometer) < activeVehicle.lastRecordedOdometerMiles;
+
+  useEffect(() => {
+    setSelectedVehicle(vehicle);
+    setRegistrationSearch(
+      allowVehicleSelection ? '' : vehicle?.registrationNumber ?? ''
+    );
+  }, [allowVehicleSelection, vehicle]);
+
+  useEffect(() => {
+    if (!allowVehicleSelection || !suggestionsOpen) return undefined;
+    let active = true;
+    const timeoutId = window.setTimeout(async () => {
+      setSuggestionsLoading(true);
+      setSuggestionsError('');
+      try {
+        const suggestions = await getVehicleRegistrationSuggestions(
+          registrationSearch
+        );
+        if (active) {
+          setVehicleSuggestions(suggestions);
+          setActiveSuggestionIndex(registrationSearch.trim() ? 0 : -1);
+        }
+      } catch (error) {
+        if (active) {
+          setVehicleSuggestions([]);
+          setSuggestionsError(error.message);
+        }
+      } finally {
+        if (active) setSuggestionsLoading(false);
+      }
+    }, 180);
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [allowVehicleSelection, registrationSearch, suggestionsOpen]);
+
+  async function selectVehicle(registrationNumber) {
+    if (!registrationNumber.trim()) return;
+    setVehicleLookupLoading(true);
+    setVehicleLookupError('');
+    try {
+      const foundVehicle = await identifyVehicle(registrationNumber);
+      setSelectedVehicle(foundVehicle);
+      setRegistrationSearch(foundVehicle.registrationNumber);
+      setSuggestionsOpen(false);
+      setMeterPhoto(null);
+      setOdometer('');
+      setSubmitError('');
+      setFlowKey((value) => value + 1);
+    } catch (error) {
+      setVehicleLookupError(error.message);
+    } finally {
+      setVehicleLookupLoading(false);
+    }
+  }
+
+  async function handleVehicleLookup(event) {
+    event.preventDefault();
+    if (suggestionsLoading) return;
+    if (activeSuggestionIndex >= 0 && vehicleSuggestions[activeSuggestionIndex]) {
+      await selectVehicle(vehicleSuggestions[activeSuggestionIndex]);
+      return;
+    }
+    if (registrationSearch.trim()) await selectVehicle(registrationSearch);
+  }
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -786,7 +872,10 @@ function FuelForm({ vehicle, onRecordCreated }) {
     try {
       const record = await createFuelRecord({
         meterPhotoId: meterPhoto.id,
-        odometerMiles: Number(data.get('odometerMiles'))
+        odometerMiles: Number(data.get('odometerMiles')),
+        ...(allowVehicleSelection
+          ? { vehicleId: activeVehicle.id }
+          : {})
       });
       form.reset();
       setMeterPhoto(null);
@@ -802,18 +891,150 @@ function FuelForm({ vehicle, onRecordCreated }) {
 
   return (
     <div className="fuel-form">
-      {vehicle ? (
-        <MeterPhotoFlow key={flowKey} onVerified={setMeterPhoto} />
+      {allowVehicleSelection && (
+        <div className="boss-vehicle-picker">
+          <form
+            className="boss-vehicle-search"
+            onSubmit={handleVehicleLookup}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setSuggestionsOpen(false);
+              }
+            }}
+          >
+            <label htmlFor="bossVehicleRegistration">
+              Find a vehicle by registration number
+              <input
+                id="bossVehicleRegistration"
+                autoComplete="off"
+                maxLength={32}
+                value={registrationSearch}
+                disabled={vehicleLookupLoading}
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={suggestionsOpen}
+                aria-controls="bossVehicleRegistrationSuggestions"
+                aria-activedescendant={
+                  activeSuggestionIndex >= 0
+                    ? `bossVehicleSuggestion-${activeSuggestionIndex}`
+                    : undefined
+                }
+                onFocus={() => setSuggestionsOpen(true)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setSuggestionsOpen(false);
+                  } else if (
+                    event.key === 'ArrowDown' &&
+                    vehicleSuggestions.length
+                  ) {
+                    event.preventDefault();
+                    setActiveSuggestionIndex((index) =>
+                      index >= vehicleSuggestions.length - 1 ? 0 : index + 1
+                    );
+                  } else if (
+                    event.key === 'ArrowUp' &&
+                    vehicleSuggestions.length
+                  ) {
+                    event.preventDefault();
+                    setActiveSuggestionIndex((index) =>
+                      index <= 0 ? vehicleSuggestions.length - 1 : index - 1
+                    );
+                  }
+                }}
+                onChange={(event) => {
+                  const registration = event.target.value;
+                  setRegistrationSearch(registration);
+                  setVehicleSuggestions([]);
+                  setActiveSuggestionIndex(-1);
+                  setSuggestionsLoading(true);
+                  setVehicleLookupError('');
+                  setSuggestionsOpen(true);
+                  if (
+                    activeVehicle &&
+                    registration.trim().toUpperCase() !==
+                      activeVehicle.registrationNumber.toUpperCase()
+                  ) {
+                    setSelectedVehicle(null);
+                    setMeterPhoto(null);
+                    setOdometer('');
+                    setSubmitError('');
+                    setFlowKey((value) => value + 1);
+                  }
+                }}
+                placeholder="e.g. 241-D-100"
+              />
+            </label>
+            {suggestionsOpen && (
+              <div
+                className="boss-vehicle-suggestions"
+                id="bossVehicleRegistrationSuggestions"
+                role="listbox"
+                aria-label="Vehicle registration suggestions"
+              >
+                {suggestionsLoading ? (
+                  <p role="status">Loading registrations...</p>
+                ) : suggestionsError ? (
+                  <p className="auth-error" role="alert">{suggestionsError}</p>
+                ) : vehicleSuggestions.length ? (
+                  vehicleSuggestions.map((registrationNumber, index) => (
+                    <button
+                      key={registrationNumber}
+                      id={`bossVehicleSuggestion-${index}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeSuggestionIndex}
+                      disabled={vehicleLookupLoading}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onMouseEnter={() => setActiveSuggestionIndex(index)}
+                      onClick={() => selectVehicle(registrationNumber)}
+                    >
+                      {registrationNumber}
+                    </button>
+                  ))
+                ) : (
+                  <p>
+                    {registrationSearch.trim()
+                      ? 'No matching registrations.'
+                      : 'No active vehicle registrations found.'}
+                  </p>
+                )}
+              </div>
+            )}
+          </form>
+          <p className="boss-vehicle-search-hint">
+            Type a few characters, then choose a suggested registration.
+          </p>
+          {vehicleLookupError && (
+            <p className="auth-error" role="alert">{vehicleLookupError}</p>
+          )}
+          {activeVehicle && (
+            <p className="boss-selected-vehicle" role="status">
+              Selected vehicle: <strong>{activeVehicle.registrationNumber}</strong>
+              {activeVehicleDetails && ` · ${activeVehicleDetails}`}
+            </p>
+          )}
+        </div>
+      )}
+      {activeVehicle ? (
+        <MeterPhotoFlow
+          key={flowKey}
+          vehicleId={allowVehicleSelection ? activeVehicle.id : null}
+          onVerified={setMeterPhoto}
+        />
       ) : (
         <div className="notice" role="note">
           <span aria-hidden="true">i</span>
-          <p>A vehicle must be assigned to your account before recording a fill.</p>
+          <p>
+            {allowVehicleSelection
+              ? 'Find a registered vehicle above to record a fill.'
+              : 'A vehicle must be assigned to your account before recording a fill.'}
+          </p>
         </div>
       )}
       <form className="transaction-form" onSubmit={handleSubmit}>
         <fieldset
           className={`transaction-entry${readingsVerified ? ' transaction-entry--ready' : ''}`}
-          disabled={!vehicle || !readingsVerified || submitting}
+          disabled={!activeVehicle || !readingsVerified || submitting}
         >
           <legend className="fieldset-heading">
             <span className="transaction-heading">
@@ -858,7 +1079,7 @@ function FuelForm({ vehicle, onRecordCreated }) {
                 onChange={(event) => setOdometer(event.target.value)}
                 aria-invalid={Boolean(odometerBelowPrevious)}
                 aria-describedby={
-                  vehicle?.lastRecordedOdometerMiles != null
+                  activeVehicle?.lastRecordedOdometerMiles != null
                     ? 'odometer-help odometer-baseline'
                     : 'odometer-help'
                 }
@@ -868,11 +1089,11 @@ function FuelForm({ vehicle, onRecordCreated }) {
             </span>
             <span className="odometer-meta">
               <span id="odometer-help">Use the reading from the vehicle&apos;s dashboard.</span>
-              {vehicle?.lastRecordedOdometerMiles != null && (
+              {activeVehicle?.lastRecordedOdometerMiles != null && (
                 <span className="odometer-baseline" id="odometer-baseline">
                   Last recorded mileage
                   <strong>
-                    {formatMileage(vehicle.lastRecordedOdometerMiles)} mi
+                    {formatMileage(activeVehicle.lastRecordedOdometerMiles)} mi
                   </strong>
                 </span>
               )}
@@ -882,7 +1103,7 @@ function FuelForm({ vehicle, onRecordCreated }) {
         {odometerBelowPrevious && (
           <p className="odometer-warning" role="alert">
             This is below the previous recorded mileage of{' '}
-            {formatMileage(vehicle.lastRecordedOdometerMiles)} mi. An administrator
+            {formatMileage(activeVehicle.lastRecordedOdometerMiles)} mi. An administrator
             must authorize this corrected value.
           </p>
         )}
@@ -913,7 +1134,7 @@ function FuelForm({ vehicle, onRecordCreated }) {
           className="primary-button submit-button"
           type="submit"
           disabled={
-            !vehicle ||
+            !activeVehicle ||
             !meterPhoto?.verifiedAt ||
             !odometer.trim() ||
             !Number.isFinite(Number(odometer)) ||
@@ -1062,14 +1283,14 @@ function WorkflowGuide() {
       <h4 id="workflowGuideTitle">Brusna&apos;s pit stop</h4>
       <FuelMascotScene />
       <p className="mascot-story">
-        Our orange co-pilot is ready to roll. Capture the handwritten readings, check
-        them, then enter the odometer.
+        Our orange co-pilot is ready to roll. Capture the PIUSI display, check both
+        readings, then enter the odometer.
       </p>
       <div className="workflow-status" role="note">
         <span className="workflow-status-dot" aria-hidden="true" />
         <p>
           <strong>Check before saving.</strong> The current fill and cumulative total
-          are separate values and must match the reading sheet.
+          are separate values and must match the PIUSI display.
         </p>
       </div>
     </aside>
@@ -3757,21 +3978,18 @@ function Workspace({
         <section className="entry-section boss-fuel-entry-section">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">ASSIGNED VEHICLE</p>
+              <p className="eyebrow">FLEET VEHICLE</p>
               <h3>Record a fill</h3>
-              <p>
-                {vehicle
-                  ? `${vehicle.registrationNumber} · ${
-                      [vehicle.make, vehicle.model].filter(Boolean).join(' ') ||
-                      'Vehicle details not listed'
-                    }`
-                  : 'No vehicle is currently assigned to your account.'}
-              </p>
+              <p>Use your assigned vehicle or find another by registration number.</p>
             </div>
             <span className="read-only-badge">Verified readings required</span>
           </div>
           <div className="entry-layout">
-            <FuelForm vehicle={vehicle} onRecordCreated={onSaved} />
+            <FuelForm
+              vehicle={vehicle}
+              onRecordCreated={onSaved}
+              allowVehicleSelection
+            />
             <WorkflowGuide />
           </div>
         </section>

@@ -21,6 +21,8 @@ _TESSERACT_PATHS = (
 )
 _GOOGLE_VISION_ENDPOINT = "https://vision.googleapis.com/v1/images:annotate"
 _GOOGLE_VISION_TIMEOUT_SECONDS = 20
+_GOOGLE_VISION_CROP = (0.08, 0.35, 0.92, 0.78)
+_GOOGLE_VISION_MIN_WIDTH = 1200
 
 
 @dataclass(frozen=True)
@@ -113,7 +115,7 @@ def parse_meter_ocr_data(
             cumulative_total_litres=cumulative_total,
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=cumulative_confidence,
-            message="The first-line fill was read as zero; check the sheet.",
+            message="The first-line fill was read as zero; check the PIUSI display.",
         )
     confidences = (current_confidence, cumulative_confidence)
     if min(confidences) < min_confidence:
@@ -146,6 +148,33 @@ def _get_tesseract_command() -> str:
         if os.access(candidate, os.X_OK):
             return candidate
     return "tesseract"
+
+
+def _prepare_google_vision_image(content: bytes) -> bytes:
+    with Image.open(BytesIO(content)) as source:
+        image = ImageOps.exif_transpose(source).convert("RGB")
+
+    width, height = image.size
+    left, top, right, bottom = (
+        round(width * _GOOGLE_VISION_CROP[0]),
+        round(height * _GOOGLE_VISION_CROP[1]),
+        round(width * _GOOGLE_VISION_CROP[2]),
+        round(height * _GOOGLE_VISION_CROP[3]),
+    )
+    if right <= left or bottom <= top:
+        raise ValueError("The photo is too small to crop the meter display.")
+
+    image = image.crop((left, top, right, bottom))
+    if image.width < _GOOGLE_VISION_MIN_WIDTH:
+        scale = _GOOGLE_VISION_MIN_WIDTH / image.width
+        image = image.resize(
+            (_GOOGLE_VISION_MIN_WIDTH, round(image.height * scale)),
+            Image.Resampling.LANCZOS,
+        )
+
+    prepared = BytesIO()
+    image.save(prepared, format="JPEG", quality=95)
+    return prepared.getvalue()
 
 
 def _google_vision_word_lines(
@@ -318,12 +347,20 @@ def _extract_google_vision_readings(
     content: bytes,
     api_key: str,
 ) -> MeterOcrResult:
+    try:
+        image_content = _prepare_google_vision_image(content)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return MeterOcrResult(
+            status="failed",
+            message="Could not prepare this photo for Google Vision. Retake it and try again.",
+        )
+
     url = f"{_GOOGLE_VISION_ENDPOINT}?{urlencode({'key': api_key})}"
     request_body = json.dumps(
         {
             "requests": [
                 {
-                    "image": {"content": base64.b64encode(content).decode("ascii")},
+                    "image": {"content": base64.b64encode(image_content).decode("ascii")},
                     "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
                 }
             ]

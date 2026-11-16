@@ -82,6 +82,19 @@ def create_assigned_vehicle_photo_session(
     return _create_photo_session(session, employee, vehicle)
 
 
+def create_vehicle_photo_session(
+    session: Session, employee: Employee, vehicle_id: int | None = None
+) -> tuple[str, str, datetime] | None:
+    if vehicle_id is None:
+        return create_assigned_vehicle_photo_session(session, employee)
+    if employee.role != "boss":
+        return None
+    vehicle = get_vehicle_by_id(session, vehicle_id)
+    if vehicle is None:
+        return None
+    return _create_photo_session(session, employee, vehicle)
+
+
 def _create_photo_session(
     session: Session, employee: Employee, vehicle: Vehicle
 ) -> tuple[str, str, datetime]:
@@ -204,9 +217,13 @@ def verify_meter_photo(
         return None
     if meter_photo.verified_at is not None:
         raise InvalidMeterVerification("This meter photo has already been verified.")
-    vehicle = get_employee_vehicle(session, employee.id)
-    if vehicle is None or vehicle.id != meter_photo.vehicle_id:
+    vehicle = get_vehicle_by_id(session, meter_photo.vehicle_id)
+    if vehicle is None:
         return None
+    if employee.role != "boss":
+        assigned_vehicle = get_employee_vehicle(session, employee.id)
+        if assigned_vehicle is None or assigned_vehicle.id != vehicle.id:
+            return None
     if (
         meter_photo.ocr_status != "ready"
         or meter_photo.ocr_current_fill_litres is None

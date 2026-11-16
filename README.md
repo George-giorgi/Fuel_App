@@ -228,9 +228,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
 - The Registry supports Diesel, AdBlue, and Petrol fuel types when registering a
   vehicle or creating an employee with a new vehicle. Fuel type and tank capacity
   must be configured before that vehicle can record a fill.
-- Authenticated employees can look up vehicles by registration. The registries
-  start empty; sample identities and vehicles are created only when the explicit
-  local demo seed command is run.
+- Authenticated employees can look up vehicles available to them by registration.
+  Boss accounts can search all active registered vehicles for a fuel entry. The
+  registries start empty; sample identities and vehicles are created only when the
+  explicit local demo seed command is run.
 - Fuel-record reads now require authentication. Fuel-record submissions remain
   available only after verified meter-photo readings and server-side ownership
   checks. Reads return only the authenticated employee's records.
@@ -249,10 +250,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
 - Admins can issue or rotate an opaque vehicle QR token. Only its SHA-256 hash
   is stored in SQLite; the QR payload is shown once in the admin UI. Rotation
   invalidates the previously printed code.
-- The employee photo flow creates a one-use session bound to the authenticated
-  employee and a vehicle assigned to them. Vehicles may be shared by multiple
-  employees. Sessions expire after 10 minutes; the
-  QR-session API remains available for QR-based clients.
+- The photo flow creates a one-use session bound to the authenticated employee
+  and vehicle. Employees are limited to assigned vehicles; Boss accounts can
+  select another active vehicle from the fleet. Vehicles may be shared by multiple
+  employees. Sessions expire after 10 minutes; the QR-session API remains
+  available for QR-based clients.
 - Meter-photo uploads accept verified JPEG/PNG images up to 10 MB. Files are
   written with private local permissions under `uploads/meter-photos/`; the
   directory is not mounted or served as static content. SQLite stores only
@@ -260,19 +262,20 @@ imported. The Render start command applies schema-only Alembic upgrades.
 
 ## Phase 7: PIUSI meter readings
 
-- After login, the employee and assigned vehicle details are retrieved from
-  their existing SQLite rows. The vehicle response includes its most recently
-  recorded odometer. Employee and vehicle IDs are taken from the authenticated
-  session and database relationship, never from transaction form fields.
-- A private photo of a handwritten reading sheet is required. Write the current
-  fill on the first line and the cumulative total on the second line, using large,
-  clear digits and a thick dark marker (not pencil). Labels are not required.
-  Frame the readings close-up so they fill most of the image. Employees review
-  the extracted values and confirm they match the sheet; they cannot type or
-  change readings. Missing, low-confidence, or unavailable OCR blocks verification
-  and transaction submission.
-- Production is configured to use Google Cloud Vision's handwriting-capable
-  `DOCUMENT_TEXT_DETECTION`; the Render blueprint sets
+- After login, employee and vehicle details are retrieved from their existing
+  SQLite rows. Vehicle responses include the most recently recorded odometer.
+  Employee IDs are taken from the authenticated session; only Boss accounts may
+  submit a vehicle ID, and the backend verifies it against the selected meter
+  photo and active vehicle record.
+- A private photo of the PIUSI meter display is required. Keep the display centered
+  and close in the frame, with both the large current-fill row and smaller
+  cumulative-total row visible and in focus. Avoid glare. Employees review the
+  extracted values and confirm they match the display; they cannot type or change
+  readings. Missing, low-confidence, or unavailable OCR blocks verification and
+  transaction submission.
+- Production uses Google Cloud Vision `DOCUMENT_TEXT_DETECTION`. Before sending a
+  PIUSI photo to Vision, the backend crops the centered display area and upscales
+  it for OCR; reading lengths remain unrestricted. The Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to
   Tesseract; to use Google Vision locally, set:
@@ -364,10 +367,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
   quick date presets or custom inclusive start/end dates. Bosses can review
   seeded demo employees and records.
 - Boss accounts can use the separate **New fill** dashboard tab to record fuel
-  for their Admin-assigned vehicle. It reuses the employee photo-verification
-  and mileage workflow; fuel entry remains unavailable until a vehicle is
-  assigned and the meter readings are verified. Admin executive view remains
-  focused on fleet management.
+  for an assigned vehicle or find another active vehicle by registration number.
+  The registration field suggests active vehicle numbers on focus and filters
+  suggestions as the Boss types. It reuses the employee photo-verification and
+  mileage workflow; meter readings must be verified before submission. Admin
+  executive view remains focused on fleet management.
 - Migration `0013_company_personal_vehicles` classifies existing vehicles as
   company vehicles by default. Admins can mark a newly registered vehicle as
   personal in either Registry form. Bosses can also assign an unclaimed

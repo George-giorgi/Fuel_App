@@ -1836,6 +1836,84 @@ select:focus-visible {
   font-size: 12px;
 }
 
+.boss-vehicle-picker {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+
+.boss-vehicle-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.boss-vehicle-suggestions {
+  z-index: 3;
+  grid-column: 1 / -1;
+  display: grid;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: var(--card-shadow);
+}
+
+.boss-vehicle-suggestions p,
+.boss-vehicle-suggestions button {
+  padding: 10px 12px;
+  color: var(--ink);
+  font-size: 11px;
+  text-align: left;
+}
+
+.boss-vehicle-suggestions p {
+  color: var(--muted);
+}
+
+.boss-vehicle-suggestions button {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+}
+
+.boss-vehicle-suggestions button:last-child {
+  border-bottom: 0;
+}
+
+.boss-vehicle-suggestions button:hover,
+.boss-vehicle-suggestions button[aria-selected='true'] {
+  background: var(--surface-muted);
+}
+
+
+
+.boss-selected-vehicle {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.boss-selected-vehicle strong {
+  color: var(--ink);
+}
+
+.boss-vehicle-search-hint {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+@media (max-width: 520px) {
+  .boss-vehicle-search {
+    grid-template-columns: 1fr;
+  }
+}
+
 .vehicle-lookup-row .outline-button {
   font-size: 11px;
 }

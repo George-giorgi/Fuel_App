@@ -20,6 +20,7 @@ from backend.app.repositories.meter_photos import get_meter_photo_by_id
 from backend.app.repositories.vehicles import (
     get_employee_vehicle,
     get_odometer_correction,
+    get_vehicle_by_id,
     is_employee_assigned_to_vehicle,
 )
 from backend.app.schemas.fuel_record import FuelRecordCreate
@@ -63,9 +64,17 @@ def create_fuel_record(
     employee: Employee,
     request: FuelRecordCreate,
 ) -> FuelRecord:
-    vehicle = get_employee_vehicle(session, employee.id)
-    if vehicle is None or not is_employee_assigned_to_vehicle(
-        vehicle, employee.id
+    if request.vehicle_id is not None and employee.role != "boss":
+        raise FuelSubmissionError("Only boss accounts can select another vehicle.")
+
+    vehicle = (
+        get_vehicle_by_id(session, request.vehicle_id)
+        if request.vehicle_id is not None
+        else get_employee_vehicle(session, employee.id)
+    )
+    if vehicle is None or (
+        request.vehicle_id is None
+        and not is_employee_assigned_to_vehicle(vehicle, employee.id)
     ):
         raise FuelSubmissionError("No vehicle is assigned to this employee.")
 

@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_employee
 from backend.app.db.session import get_db_session
-from backend.app.models import Employee
+from backend.app.models import Employee, Vehicle
 from backend.app.schemas.vehicle import VehicleRead
 from backend.app.schemas import FuelRecordRead
 from backend.app.repositories.fuel_records import (
@@ -17,6 +18,43 @@ from backend.app.services.vehicles import get_assigned_vehicle, identify_vehicle
 
 
 router = APIRouter(prefix="/api/vehicles", tags=["vehicles"])
+
+
+@router.get("/suggestions", response_model=list[str])
+def vehicle_registration_suggestions(
+    session: Annotated[Session, Depends(get_db_session)],
+    employee: Annotated[Employee, Depends(get_current_employee)],
+    search: Annotated[str | None, Query(max_length=32)] = None,
+) -> list[str]:
+    if employee.role != "boss":
+        raise HTTPException(
+            status_code=403,
+            detail="Only Boss accounts can browse fleet vehicle registrations.",
+        )
+
+    statement = select(Vehicle.registration_number).where(
+        Vehicle.is_active.is_(True)
+    )
+    term = (search or "").strip()
+    if term:
+        escaped_term = (
+            term.replace("/", "//").replace("%", "/%").replace("_", "/_")
+        )
+        prefix_match = Vehicle.registration_number.ilike(
+            f"{escaped_term}%", escape="/"
+        )
+        statement = statement.where(
+            Vehicle.registration_number.ilike(f"%{escaped_term}%", escape="/")
+        )
+        statement = statement.order_by(
+            case((prefix_match, 0), else_=1),
+            Vehicle.registration_number,
+        )
+    else:
+        statement = statement.order_by(Vehicle.registration_number)
+    return list(
+        session.scalars(statement.limit(50 if term else 10))
+    )
 
 
 @router.get("/me", response_model=VehicleRead | None)
@@ -55,8 +93,15 @@ def lookup_vehicle(
     employee: Annotated[Employee, Depends(get_current_employee)],
 ) -> VehicleRead:
     vehicle = identify_vehicle(session, registration_number)
-    if vehicle is None or not is_vehicle_available_to_employee(
-        vehicle, employee.id
+    if vehicle is None or (
+        employee.role != "boss"
+        and not is_vehicle_available_to_employee(vehicle, employee.id)
     ):
         raise HTTPException(status_code=404, detail="Vehicle not found.")
-    return VehicleRead.model_validate(vehicle)
+    return VehicleRead.model_validate(vehicle).model_copy(
+        update={
+            "last_recorded_odometer_miles": get_latest_vehicle_odometer(
+                session, vehicle.id
+            ),
+        }
+    )

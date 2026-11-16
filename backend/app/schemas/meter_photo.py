@@ -11,6 +11,16 @@ class QrSessionCreate(BaseModel):
     qr_payload: str = Field(min_length=1, max_length=128)
 
 
+class MeterPhotoSessionCreate(BaseModel):
+    model_config = ConfigDict(
+        alias_generator=to_camel_case,
+        populate_by_name=True,
+        extra="forbid",
+    )
+
+    vehicle_id: int = Field(gt=0)
+
+
 class MeterPhotoSessionRead(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel_case, populate_by_name=True)
 
