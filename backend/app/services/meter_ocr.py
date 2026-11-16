@@ -29,6 +29,7 @@ _GOOGLE_VISION_TOTAL_ROW_CROP = (0.18, 0.54, 0.80, 0.70)
 _GOOGLE_VISION_MIN_WIDTH = 1200
 _GOOGLE_VISION_CURRENT_ROW_MIN_WIDTH = 1600
 _GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH = 1600
+_GOOGLE_VISION_MIN_CONFIDENCE = 80.0
 
 
 @dataclass(frozen=True)
@@ -617,6 +618,23 @@ def _extract_google_vision_readings(
 
     _, current_text, current_confidence = current_reading
     _, total_text, total_confidence = total_readings[0]
+    display_total = display_readings[1] if len(display_readings) > 1 else None
+    if (
+        display_total is not None
+        and abs(float(display_total[1]) - float(total_text)) > 0.00005
+    ):
+        return MeterOcrResult(
+            status="uncertain",
+            current_fill_litres=float(current_text),
+            cumulative_total_litres=float(total_text),
+            current_fill_confidence=current_confidence,
+            cumulative_total_confidence=total_confidence,
+            message=(
+                "Google Vision read different PIUSI TOTAL values from the display "
+                "and close-up. Retake the photo."
+            ),
+        )
+
     return parse_meter_ocr_data(
         {
             "text": [
@@ -631,7 +649,8 @@ def _extract_google_vision_readings(
             "block_num": [1, 1],
             "par_num": [1, 1],
             "line_num": [1, 2],
-        }
+        },
+        min_confidence=_GOOGLE_VISION_MIN_CONFIDENCE,
     )
 
 

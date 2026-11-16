@@ -1397,6 +1397,64 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(result.current_fill_confidence, 94.0)
         self.assertEqual(result.cumulative_total_confidence, 96.0)
 
+        def read_with_total_candidates(
+            display_total: str,
+            close_total: str,
+            confidence: float,
+        ) -> MeterOcrResult:
+            response_data = {
+                "responses": [
+                    {
+                        "fullTextAnnotation": vision_document(
+                            [
+                                vision_word("22032", 10, 100, 0.96),
+                                vision_word(display_total, 10, 150, 0.96),
+                            ]
+                        )
+                    },
+                    {"fullTextAnnotation": vision_document([])},
+                    {
+                        "fullTextAnnotation": vision_document(
+                            [vision_word(close_total, 10, 50, confidence)]
+                        )
+                    },
+                ]
+            }
+            variant_response = MagicMock()
+            variant_response.__enter__.return_value.read.return_value = json.dumps(
+                response_data
+            ).encode()
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "FUEL_OCR_PROVIDER": "google_vision",
+                        "GOOGLE_CLOUD_VISION_API_KEY": "test-key",
+                    },
+                ),
+                patch(
+                    "backend.app.services.meter_ocr.urlopen",
+                    return_value=variant_response,
+                ),
+            ):
+                return extract_meter_readings(image.getvalue())
+
+        disagreeing_total = read_with_total_candidates(
+            "261563",
+            "2615631",
+            0.96,
+        )
+        self.assertEqual(disagreeing_total.status, "uncertain")
+        self.assertIn("different PIUSI TOTAL values", disagreeing_total.message)
+
+        low_confidence_total = read_with_total_candidates(
+            "26.56",
+            "2615631",
+            0.65,
+        )
+        self.assertEqual(low_confidence_total.status, "uncertain")
+        self.assertEqual(low_confidence_total.cumulative_total_confidence, 65.0)
+
     def test_google_vision_requires_key_and_reports_api_errors(self) -> None:
         image = BytesIO()
         Image.new("RGB", (768, 1024), "white").save(image, format="JPEG")

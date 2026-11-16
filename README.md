@@ -279,8 +279,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Since the PIUSI display uses three decimal places for the current-fill row and
   four for TOTAL, the backend restores those decimal positions even when OCR
   misreads or misses the decimal mark. If the close crop misses the current row,
-  OCR can fall back to the full-display reading. Integer digit counts remain
-  unrestricted. The Render blueprint sets
+  OCR can fall back to the full-display reading. OCR only marks a reading ready
+  at 80% confidence or higher, and a TOTAL mismatch between full-display and
+  close-up OCR requires a retake. Integer digit counts remain unrestricted. The
+  Render blueprint sets
   `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
   secret in the Render backend environment. Local development defaults to
   Tesseract; to use Google Vision locally, set:
