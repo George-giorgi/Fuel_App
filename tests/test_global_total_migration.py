@@ -138,7 +138,9 @@ class GlobalTotalMigrationTests(unittest.TestCase):
                             (1, 1, 22032, 22032, 261563, 261563, 22032,
                                 NULL, '22032', 261563, '261563'),
                             (2, 2, 22.032, 22.032, 261.563, 261.563, 22.032,
-                                NULL, NULL, NULL, NULL)
+                                NULL, NULL, NULL, NULL),
+                            (3, 3, 202611161226523, 202611161226523,
+                                NULL, NULL, NULL, NULL, NULL, NULL, NULL)
                         """
                     )
                 )
@@ -149,7 +151,12 @@ class GlobalTotalMigrationTests(unittest.TestCase):
                             (1, 261563, 261563, '261563', NULL, 22032, '22032',
                                 22032, NULL, NULL, NULL, NULL, 'ocr_confirmed'),
                             (2, 261.563, 261.563, '261563', NULL, 22.032, '22032',
-                                22.032, NULL, NULL, NULL, NULL, 'ocr_confirmed')
+                                22.032, NULL, NULL, NULL, NULL, 'ocr_confirmed'),
+                            (3, NULL, NULL, NULL, NULL, NULL, NULL,
+                                202611161226523, NULL, NULL, NULL, NULL, 'tesseract'),
+                            (4, NULL, NULL, NULL, NULL, NULL, NULL,
+                                202611161226523, NULL, '202611161226523',
+                                NULL, NULL, 'tesseract')
                         """
                     )
                 )
@@ -214,6 +221,42 @@ class GlobalTotalMigrationTests(unittest.TestCase):
                         )
                     ).one(),
                     (261.563, 261.563, 3, 261563, "261563", 22.032, 22032),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        text(
+                            """
+                            SELECT current_fill_litres, current_fill_milli_litres,
+                                current_fill_raw_digits
+                            FROM meter_photos WHERE id = 3
+                            """
+                        )
+                    ).one(),
+                    (202611161226523, None, None),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        text(
+                            """
+                            SELECT current_fill_litres, current_fill_milli_litres,
+                                current_fill_raw_digits
+                            FROM meter_photos WHERE id = 4
+                            """
+                        )
+                    ).one(),
+                    (202611161226523, None, "202611161226523"),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        text(
+                            """
+                            SELECT current_fill_litres, current_fill_milli_litres,
+                                current_fill_raw_digits
+                            FROM fuel_records WHERE id = 3
+                            """
+                        )
+                    ).one(),
+                    (202611161226523, None, None),
                 )
                 self.assertEqual(
                     connection.execute(

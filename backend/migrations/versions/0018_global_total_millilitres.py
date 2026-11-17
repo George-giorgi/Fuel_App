@@ -40,6 +40,8 @@ _FLOAT_COLUMNS = {
         "baseline_cumulative_total_litres",
     },
 }
+_POSTGRES_INTEGER_MAX = 2_147_483_647
+_POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -63,15 +65,19 @@ def _is_whole_digit_storage(value: Decimal | None, raw_digits: object) -> bool:
     return value is not None and digits is not None and value == Decimal(digits)
 
 
-def _units(value: Decimal | None) -> int | None:
+def _units(
+    value: Decimal | None,
+    maximum: int = _POSTGRES_BIGINT_MAX,
+) -> int | None:
     if value is None or value < 0:
         return None
     milli_litres = value * 1000
-    return (
-        int(milli_litres)
-        if milli_litres == milli_litres.to_integral_value()
-        else None
-    )
+    if (
+        milli_litres != milli_litres.to_integral_value()
+        or milli_litres > maximum
+    ):
+        return None
+    return int(milli_litres)
 
 
 def _columns(connection: sa.Connection, table: str) -> set[str]:
@@ -159,13 +165,13 @@ def _normalize_photo_rows(connection: sa.Connection) -> dict[int, dict[str, obje
         ):
             number = _decimal(row.get(value_column))
             raw_digits = row.get(raw_column)
-            scaled = _is_whole_digit_storage(number, raw_digits) or (
-                is_fill
-                and number is not None
-                and number > 100
-                and number == number.to_integral_value()
-            )
+            scaled = _is_whole_digit_storage(number, raw_digits)
             normalized = number / 1000 if scaled and number is not None else number
+            maximum = _POSTGRES_INTEGER_MAX if is_fill else _POSTGRES_BIGINT_MAX
+            units = _units(normalized, maximum)
+            if units is None:
+                scaled = False
+                normalized = number
             if value_column in columns and scaled and normalized is not None:
                 values[value_column] = float(normalized)
 
@@ -188,12 +194,7 @@ def _normalize_photo_rows(connection: sa.Connection) -> dict[int, dict[str, obje
             raw_digits = row.get(result_raw_column)
             if not _valid_digits(raw_digits):
                 raw_digits = row.get(ocr_raw_column)
-            scaled = _is_whole_digit_storage(number, raw_digits) or (
-                is_fill
-                and number is not None
-                and number > 100
-                and number == number.to_integral_value()
-            )
+            scaled = _is_whole_digit_storage(number, raw_digits)
             if (
                 not is_fill
                 and manual_correction
@@ -203,7 +204,11 @@ def _normalize_photo_rows(connection: sa.Connection) -> dict[int, dict[str, obje
             ):
                 scaled = True
             normalized = number / 1000 if scaled and number is not None else number
-            units = _units(normalized)
+            maximum = _POSTGRES_INTEGER_MAX if is_fill else _POSTGRES_BIGINT_MAX
+            units = _units(normalized, maximum)
+            if units is None:
+                scaled = False
+                normalized = number
             if scaled and normalized is not None:
                 values[value_column] = float(normalized)
             integer_column = (
@@ -260,21 +265,18 @@ def _normalize_fuel_rows(
             if row.get("current_fill_litres") is not None
             else row.get("litres")
         )
-        fill_scaled = _is_whole_digit_storage(fill_number, fill_raw) or (
-            fill_number is not None
-            and fill_number > 100
-            and fill_number == fill_number.to_integral_value()
-        )
+        fill_scaled = _is_whole_digit_storage(fill_number, fill_raw)
         normalized_fill = (
             fill_number / 1000 if fill_scaled and fill_number is not None else fill_number
         )
-        fill_units = _units(normalized_fill)
+        fill_units = _units(normalized_fill, _POSTGRES_INTEGER_MAX)
+        if fill_units is None:
+            fill_scaled = False
+            normalized_fill = fill_number
         for column in ("current_fill_litres", "litres"):
             number = _decimal(row.get(column))
-            if number is not None:
-                column_scaled = _is_whole_digit_storage(number, fill_raw) or (
-                    number > 100 and number == number.to_integral_value()
-                )
+            if number is not None and fill_units is not None:
+                column_scaled = _is_whole_digit_storage(number, fill_raw)
                 if column_scaled:
                     values[column] = float(number / 1000)
         if (
@@ -317,9 +319,12 @@ def _normalize_fuel_rows(
             else total_number
         )
         total_units = _units(normalized_total)
+        if total_units is None:
+            total_scaled = False
+            normalized_total = total_number
         for column in ("cumulative_meter_reading", "cumulative_total_litres"):
             number = _decimal(row.get(column))
-            if number is not None:
+            if number is not None and total_units is not None:
                 column_scaled = _is_whole_digit_storage(number, total_raw) or (
                     manual_correction
                     and number > 100
@@ -374,6 +379,10 @@ def _normalize_related_rows(
             raw = row.get(raw_column)
             scaled = _is_whole_digit_storage(number, raw)
             normalized = number / 1000 if scaled and number is not None else number
+            units = _units(normalized)
+            if units is None:
+                scaled = False
+                normalized = number
             if scaled and normalized is not None:
                 values[value_column] = float(normalized)
             integer_column = (
@@ -390,7 +399,6 @@ def _normalize_related_rows(
                 and row.get(integer_column) is None
                 and normalized is not None
             ):
-                units = _units(normalized)
                 if units is not None:
                     values[integer_column] = units
         _update(connection, table, int(row["id"]), values, row)
