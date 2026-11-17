@@ -39,6 +39,7 @@ import {
 import {
   formatMileage
 } from './utils/distance.js';
+import { ocrValueToRawDigits } from './utils/meterReadings.js';
 
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 const SUBMISSION_NOTICE =
@@ -704,7 +705,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
                 setManualConfirmed(false);
                 onManualReadings(null);
               }}
-              placeholder="e.g. 261563 = 261563 L"
+              placeholder="e.g. 261563 = 261.563 L"
             />
           </label>
           <label>
@@ -985,7 +986,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
                   pattern="[0-9]+"
                   value={cumulativeTotalDraft}
                   onChange={(event) => setCumulativeTotalDraft(event.target.value)}
-                  placeholder="e.g. 261563 = 261563 L"
+                  placeholder="e.g. 261563 = 261.563 L"
                 />
               </label>
               <label className="meter-confirmation">
@@ -1809,18 +1810,14 @@ function currentFillDraftValue(photo) {
   if (photo.ocrCurrentFillRawDigits) {
     return photo.ocrCurrentFillRawDigits;
   }
-  return Number.isInteger(photo.ocrCurrentFillLitres)
-    ? String(photo.ocrCurrentFillLitres)
-    : '';
+  return ocrValueToRawDigits(photo.ocrCurrentFillLitres);
 }
 
 function cumulativeTotalDraftValue(photo) {
   if (photo.ocrCumulativeTotalRawDigits) {
     return photo.ocrCumulativeTotalRawDigits;
   }
-  return Number.isInteger(photo.ocrCumulativeTotalLitres)
-    ? String(photo.ocrCumulativeTotalLitres)
-    : '';
+  return ocrValueToRawDigits(photo.ocrCumulativeTotalLitres);
 }
 
 function downloadJson(value, filename) {
