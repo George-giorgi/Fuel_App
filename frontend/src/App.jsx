@@ -29,6 +29,7 @@ import {
   logout,
   previewFuelReading,
   provisionVehicleQr,
+  recognizeMeterPhoto,
   startMeterPhotoSession,
   uploadMeterPhoto,
   updateEmployeeRole,
@@ -47,6 +48,86 @@ import {
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 const SUBMISSION_NOTICE =
   'Fuel dispensed is calculated from the difference between accepted cumulative TOTAL readings. The original photo and OCR evidence are retained with the confirmed reading.';
+const MAX_METER_PHOTO_BYTES = 10 * 1024 * 1024;
+
+function meterPhotoFileType(file) {
+  const fileType = file.type?.toLowerCase();
+  if (fileType?.startsWith('image/')) return fileType;
+  const extension = file.name.match(/\.([a-z0-9]{1,16})$/i)?.[1]?.toLowerCase();
+  if (!extension) return '';
+  return `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+}
+
+function meterPhotoFileError(file) {
+  const fileType = meterPhotoFileType(file);
+  const declaredType = file.type?.toLowerCase();
+  const mayBeCameraRaw =
+    declaredType === 'application/octet-stream' ||
+    declaredType?.startsWith('application/x-');
+  if (
+    (declaredType &&
+      !declaredType.startsWith('image/') &&
+      !mayBeCameraRaw) ||
+    !fileType.startsWith('image/')
+  ) {
+    return 'Choose a file in a supported photo format.';
+  }
+  if (file.size === 0 || file.size > MAX_METER_PHOTO_BYTES) {
+    return 'The photo must be larger than 0 bytes and no larger than 10 MB.';
+  }
+  return '';
+}
+
+async function createOptimizedOcrPhoto(file) {
+  let decodedImage;
+  try {
+    if (typeof createImageBitmap === 'function') {
+      decodedImage = await createImageBitmap(file);
+    } else {
+      throw new Error('ImageBitmap is unavailable.');
+    }
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      decodedImage = await new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error('The selected photo could not be decoded.'));
+        image.src = url;
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  const scale = Math.min(
+    1,
+    3000 / Math.max(decodedImage.width, decodedImage.height)
+  );
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(decodedImage.width * scale));
+  canvas.height = Math.max(1, Math.round(decodedImage.height * scale));
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not prepare the iPhone photo for OCR.');
+  context.drawImage(decodedImage, 0, 0, canvas.width, canvas.height);
+  if (typeof decodedImage.close === 'function') decodedImage.close();
+
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (result) =>
+        result
+          ? resolve(result)
+          : reject(new Error('Could not create an optimized OCR photo.')),
+      'image/jpeg',
+      0.96
+    );
+  });
+  return new File(
+    [blob],
+    `${file.name.replace(/\.[^.]+$/, '')}-ocr.jpg`,
+    { type: 'image/jpeg' }
+  );
+}
 
 function Brand() {
   return (
@@ -381,20 +462,31 @@ function SessionRestoreScreen() {
 
 function MeterPhotoFlow({ onVerified, vehicleId }) {
   const videoRef = useRef(null);
+  const photoFileInputRef = useRef(null);
+  const photoSessionTokenRef = useRef(null);
+  const manualUploadSessionTokenRef = useRef(null);
+  const photoUploadLockRef = useRef(false);
+  const verificationLockRef = useRef(false);
   const [entryMode, setEntryMode] = useState('photo');
   const [photo, setPhoto] = useState(null);
   const [pendingPhoto, setPendingPhoto] = useState(null);
+  const [pendingProcessingPhoto, setPendingProcessingPhoto] = useState(null);
+  const [preparingPhoto, setPreparingPhoto] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [cameraStream, setCameraStream] = useState(null);
   const [openingCamera, setOpeningCamera] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
+  const [readingOcr, setReadingOcr] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState('');
   const [cumulativeTotalDraft, setCumulativeTotalDraft] = useState('');
+  const [cumulativeTotalEdited, setCumulativeTotalEdited] = useState(false);
   const [manualCumulativeTotalDraft, setManualCumulativeTotalDraft] = useState('');
   const [manualEvidenceFile, setManualEvidenceFile] = useState(null);
+  const [manualUploadedPhoto, setManualUploadedPhoto] = useState(null);
   const [manualConfirmed, setManualConfirmed] = useState(false);
   const [readingPreview, setReadingPreview] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -406,9 +498,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
   }, [previewUrl]);
 
   useEffect(() => {
-    if (!photo || photo.verifiedAt) return;
+    if (!photo || photo.verifiedAt || cumulativeTotalEdited) return;
     setCumulativeTotalDraft(cumulativeTotalDraftValue(photo));
-  }, [photo]);
+  }, [photo, cumulativeTotalEdited]);
 
   useEffect(() => {
     setReadingPreview(null);
@@ -515,7 +607,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
               ? resolve(blob)
               : reject(new Error('Could not capture the photo. Please try again.')),
           'image/jpeg',
-          0.92
+          0.96
         );
       });
       const capturedPhoto = new File(
@@ -523,9 +615,14 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
         `meter-readings-${Date.now()}.jpg`,
         { type: 'image/jpeg' }
       );
+      const fileError = meterPhotoFileError(capturedPhoto);
+      if (fileError) throw new Error(fileError);
+      photoSessionTokenRef.current = null;
       setPendingPhoto(capturedPhoto);
+      setPendingProcessingPhoto(null);
       setPreviewUrl(URL.createObjectURL(capturedPhoto));
       setCameraStream(null);
+      setCumulativeTotalEdited(false);
       setError('');
     } catch (captureError) {
       setError(captureError.message);
@@ -534,33 +631,127 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     }
   }
 
-  async function uploadCapturedPhoto() {
-    if (!pendingPhoto) return;
-
-    setUploading(true);
-    setError('');
-    setUploadStatus('Preparing secure photo upload...');
-    try {
-      const uploadSession = await startMeterPhotoSession(vehicleId);
-      setUploadStatus('Uploading the photo and reading the TOTAL row...');
-      const uploadedPhoto = await uploadMeterPhoto(
-        uploadSession.sessionToken,
-        pendingPhoto
-      );
-      setPhoto(uploadedPhoto);
-      setPreviewUrl(URL.createObjectURL(pendingPhoto));
+  async function handlePhotoFileSelected(event) {
+    const selectedPhoto = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!selectedPhoto) return;
+    const fileError = meterPhotoFileError(selectedPhoto);
+    if (fileError) {
+      photoSessionTokenRef.current = null;
       setPendingPhoto(null);
+      setPendingProcessingPhoto(null);
+      setPreviewUrl(null);
+      setError(fileError);
+      return;
+    }
+
+    const fileType = meterPhotoFileType(selectedPhoto);
+    const originalPhoto =
+      selectedPhoto.type === fileType
+        ? selectedPhoto
+        : new File([selectedPhoto], selectedPhoto.name, {
+            type: fileType,
+            lastModified: selectedPhoto.lastModified
+          });
+    photoSessionTokenRef.current = null;
+    setPhoto(null);
+    setPendingPhoto(originalPhoto);
+    setPendingProcessingPhoto(null);
+    setPreviewUrl(URL.createObjectURL(originalPhoto));
+    setCumulativeTotalDraft('');
+    setCumulativeTotalEdited(false);
+    setError('');
+    if (fileType !== 'image/jpeg' && fileType !== 'image/png') {
+      setPreparingPhoto(true);
+      try {
+        const processingPhoto = await createOptimizedOcrPhoto(originalPhoto);
+        if (processingPhoto.size > 8 * 1024 * 1024) {
+          throw new Error(
+            'The optimized photo is too large for OCR. Choose a smaller photo.'
+          );
+        }
+        setPendingProcessingPhoto(processingPhoto);
+        setPreviewUrl(URL.createObjectURL(processingPhoto));
+      } catch (processingError) {
+        setError(processingError.message);
+      } finally {
+        setPreparingPhoto(false);
+      }
+    }
+  }
+
+  async function readUploadedPhoto(
+    uploadedPhoto,
+    processingPhoto = pendingProcessingPhoto
+  ) {
+    setReadingOcr(true);
+    setUploadStatus('Reading meter...');
+    setError('');
+    try {
+      setPhoto(
+        await recognizeMeterPhoto(uploadedPhoto.id, processingPhoto)
+      );
     } catch (requestError) {
-      setError(requestError.message);
+      setPhoto({
+        ...uploadedPhoto,
+        ocrStatus: 'failed',
+        ocrRequiresManualReview: true
+      });
+      setError(
+        `Could not read the TOTAL row. Retry OCR or enter the six digits manually. ${requestError.message}`
+      );
     } finally {
-      setUploading(false);
+      setReadingOcr(false);
       setUploadStatus('');
     }
   }
 
+  async function uploadCapturedPhoto() {
+    if (!pendingPhoto || photoUploadLockRef.current) return;
+
+    photoUploadLockRef.current = true;
+    setUploading(true);
+    setUploadProgress(0);
+    setError('');
+    try {
+      const fileError = meterPhotoFileError(pendingPhoto);
+      if (fileError) throw new Error(fileError);
+      if (!photoSessionTokenRef.current) {
+        setUploadStatus('Preparing photo upload...');
+        const uploadSession = await startMeterPhotoSession(vehicleId);
+        photoSessionTokenRef.current = uploadSession.sessionToken;
+      }
+      setUploadStatus('Uploading photo...');
+      const uploadedPhoto = await uploadMeterPhoto(
+        photoSessionTokenRef.current,
+        pendingPhoto,
+        'ocr',
+        setUploadProgress
+      );
+      setPhoto(uploadedPhoto);
+      setPendingPhoto(null);
+      setCumulativeTotalEdited(false);
+      photoSessionTokenRef.current = null;
+      setUploading(false);
+      await readUploadedPhoto(uploadedPhoto, pendingProcessingPhoto);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setUploading(false);
+      photoUploadLockRef.current = false;
+      setUploadStatus('');
+    }
+  }
+
+  async function retryPhotoOcr() {
+    if (!photo || readingOcr) return;
+    await readUploadedPhoto(photo, pendingProcessingPhoto);
+  }
+
   async function handleVerify(event) {
     event.preventDefault();
-    if (!photo) return;
+    if (!photo || verifying || verificationLockRef.current) return;
+    verificationLockRef.current = true;
     setVerifying(true);
     setError('');
     try {
@@ -574,6 +765,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
       setError(requestError.message);
     } finally {
       setVerifying(false);
+      verificationLockRef.current = false;
     }
   }
 
@@ -581,9 +773,14 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     setCameraStream(null);
     setPhoto(null);
     setPendingPhoto(null);
+    setPendingProcessingPhoto(null);
     setPreviewUrl(null);
     setManualCumulativeTotalDraft('');
     setManualEvidenceFile(null);
+    setManualUploadedPhoto(null);
+    setPreviewUrl(null);
+    photoSessionTokenRef.current = null;
+    manualUploadSessionTokenRef.current = null;
     setManualConfirmed(false);
     setEntryMode('manual');
     setError('');
@@ -592,40 +789,93 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
 
   function enterPhotoMode() {
     setEntryMode('photo');
+    setManualUploadedPhoto(null);
+    manualUploadSessionTokenRef.current = null;
     setManualConfirmed(false);
+  }
+
+  function handleManualEvidenceSelected(event) {
+    const selectedPhoto = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!selectedPhoto) return;
+    const fileError = meterPhotoFileError(selectedPhoto);
+    if (fileError) {
+      manualUploadSessionTokenRef.current = null;
+      setManualUploadedPhoto(null);
+      setManualEvidenceFile(null);
+      setPreviewUrl(null);
+      setError(fileError);
+      return;
+    }
+
+    const fileType = meterPhotoFileType(selectedPhoto);
+    const originalPhoto =
+      selectedPhoto.type === fileType
+        ? selectedPhoto
+        : new File([selectedPhoto], selectedPhoto.name, {
+            type: fileType,
+            lastModified: selectedPhoto.lastModified
+          });
+    manualUploadSessionTokenRef.current = null;
+    setManualUploadedPhoto(null);
+    setManualEvidenceFile(originalPhoto);
+    setPreviewUrl(URL.createObjectURL(originalPhoto));
+    setManualConfirmed(false);
+    setError('');
   }
 
   async function handleManualConfirm(event) {
     event.preventDefault();
-    if (!manualConfirmed) return;
+    if (!manualConfirmed || verifying || verificationLockRef.current) return;
     if (!manualEvidenceFile) {
       setError('A meter photo is required before confirming manual readings.');
+      return;
+    }
+    const fileError = meterPhotoFileError(manualEvidenceFile);
+    if (fileError) {
+      setError(fileError);
       return;
     }
     const readings = {
       cumulativeTotalRawDigits: manualCumulativeTotalDraft.trim()
     };
+    verificationLockRef.current = true;
     setVerifying(true);
+    setUploadProgress(0);
     setError('');
     try {
-      const uploadSession = await startMeterPhotoSession(vehicleId);
-      const uploadedPhoto = await uploadMeterPhoto(
-        uploadSession.sessionToken,
-        manualEvidenceFile,
-        'manual'
-      );
+      let uploadedPhoto = manualUploadedPhoto;
+      if (!uploadedPhoto) {
+        if (!manualUploadSessionTokenRef.current) {
+          setUploadStatus('Preparing photo upload...');
+          const uploadSession = await startMeterPhotoSession(vehicleId);
+          manualUploadSessionTokenRef.current = uploadSession.sessionToken;
+        }
+        setUploadStatus('Uploading photo...');
+        uploadedPhoto = await uploadMeterPhoto(
+          manualUploadSessionTokenRef.current,
+          manualEvidenceFile,
+          'manual',
+          setUploadProgress
+        );
+        setManualUploadedPhoto(uploadedPhoto);
+        manualUploadSessionTokenRef.current = null;
+      }
+      setUploadStatus('Saving confirmed TOTAL...');
       const verifiedPhoto = await verifyMeterPhoto(uploadedPhoto.id, {
         confirmed: true,
         ...readings
       });
       setPhoto(verifiedPhoto);
-      setPreviewUrl(URL.createObjectURL(manualEvidenceFile));
+      setManualUploadedPhoto(null);
       setEntryMode('photo');
       onVerified(verifiedPhoto);
     } catch (requestError) {
       setError(requestError.message);
     } finally {
       setVerifying(false);
+      verificationLockRef.current = false;
+      setUploadStatus('');
     }
   }
 
@@ -633,8 +883,13 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     setCameraStream(null);
     setPhoto(null);
     setPendingPhoto(null);
+    setPendingProcessingPhoto(null);
+    setPreparingPhoto(false);
     setPreviewUrl(null);
     setCumulativeTotalDraft('');
+    setCumulativeTotalEdited(false);
+    photoSessionTokenRef.current = null;
+    manualUploadSessionTokenRef.current = null;
     setError('');
     setEntryMode('photo');
     onVerified(null);
@@ -664,7 +919,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             className="reading-sheet-template"
             aria-label="PIUSI TOTAL scale"
           >
-            <p><strong>TOTAL row:</strong> raw digits ÷ 1,000 = litres</p>
+            <p><strong>TOTAL row:</strong> the last three digits are decimal places</p>
           </div>
         </div>
       </div>
@@ -676,7 +931,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             267981 is 267.981 L. Manual entry still requires a supporting photo.
           </p>
           <label>
-            Global cumulative raw digits (TOTAL row)
+            Global Cumulative Total
             <input
               type="text"
               inputMode="numeric"
@@ -702,15 +957,18 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             Supporting meter photo (required)
             <input
               type="file"
-              accept="image/jpeg,image/png"
-              capture="environment"
+              accept="image/*"
               required
-              onChange={(event) => {
-                setManualEvidenceFile(event.target.files?.[0] ?? null);
-                setManualConfirmed(false);
-              }}
+              onChange={handleManualEvidenceSelected}
             />
           </label>
+          {manualEvidenceFile && previewUrl && (
+            <img
+              className="meter-photo-preview"
+              src={previewUrl}
+              alt="Selected original meter photo"
+            />
+          )}
           <label className="meter-confirmation">
             <input
               type="checkbox"
@@ -728,8 +986,13 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             disabled={verifying || !manualEvidenceFile}
           >
             <AppIcon name="check" size={16} />
-            {verifying ? 'Uploading meter photo...' : 'Confirm manual TOTAL'}
+            {verifying
+              ? uploadStatus || 'Saving confirmed TOTAL...'
+              : 'Confirm manual TOTAL'}
           </button>
+          {verifying && uploadStatus === 'Uploading photo...' && (
+            <p role="status">{`Uploading photo (${uploadProgress}%)...`}</p>
+          )}
           <button
             className="outline-button"
             type="button"
@@ -743,25 +1006,43 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
         </form>
       )}
       {entryMode === 'photo' && !photo && !pendingPhoto && !cameraStream && (
-        <button
-          className={`camera-start-button${openingCamera ? ' is-opening' : ''}`}
-          type="button"
-          onClick={() => void openCamera()}
-          disabled={uploading || openingCamera}
-          aria-busy={openingCamera}
-          aria-label={openingCamera ? 'Opening camera' : 'Open camera'}
-        >
-          <span className="camera-start-icon">
-            <AppIcon name="camera" size={20} />
-          </span>
-          <span className="camera-start-copy">
-            <strong aria-live="polite">
-              {openingCamera ? 'Opening camera...' : 'Open camera'}
-            </strong>
-            <small>Capture the bottom TOTAL row in one clear photo</small>
-          </span>
-          <span className="camera-start-arrow" aria-hidden="true">-&gt;</span>
-        </button>
+        <>
+          <button
+            className={`camera-start-button${openingCamera ? ' is-opening' : ''}`}
+            type="button"
+            onClick={() => void openCamera()}
+            disabled={uploading || preparingPhoto || openingCamera}
+            aria-busy={openingCamera}
+            aria-label={openingCamera ? 'Opening camera' : 'Open camera'}
+          >
+            <span className="camera-start-icon">
+              <AppIcon name="camera" size={20} />
+            </span>
+            <span className="camera-start-copy">
+              <strong aria-live="polite">
+                {openingCamera ? 'Opening camera...' : 'Open camera'}
+              </strong>
+              <small>Capture the bottom TOTAL row in one clear photo</small>
+            </span>
+            <span className="camera-start-arrow" aria-hidden="true">-&gt;</span>
+          </button>
+          <div className="meter-camera-actions">
+            <button
+              className="outline-button"
+              type="button"
+              onClick={() => photoFileInputRef.current?.click()}
+            >
+              Choose existing photo
+            </button>
+            <input
+              ref={photoFileInputRef}
+              className="meter-photo-file-input"
+              type="file"
+              accept="image/*"
+              onChange={handlePhotoFileSelected}
+            />
+          </div>
+        </>
       )}
       {entryMode === 'photo' && cameraStream && (
         <div className="meter-camera">
@@ -810,24 +1091,30 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
               className="primary-button"
               type="button"
               onClick={() => void uploadCapturedPhoto()}
-              disabled={uploading}
+              disabled={uploading || preparingPhoto}
             >
               <AppIcon name="upload" size={16} />
               <span>
-                {uploading ? 'Uploading and reading...' : 'Upload photo and run OCR'}
+                {preparingPhoto
+                  ? 'Preparing photo for OCR...'
+                  : uploading
+                    ? `Uploading photo (${uploadProgress}%)...`
+                    : 'Upload photo'}
               </span>
             </button>
             <button
               className="outline-button"
               type="button"
               onClick={startAnotherPhoto}
-              disabled={uploading}
+              disabled={uploading || preparingPhoto}
             >
               <AppIcon name="camera" size={15} />
               Retake photo
             </button>
           </div>
-          {uploading && <p role="status">{uploadStatus}</p>}
+          {(uploading || preparingPhoto) && (
+            <p role="status">{preparingPhoto ? 'Preparing photo...' : uploadStatus}</p>
+          )}
         </div>
       )}
       {error && (
@@ -842,42 +1129,34 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
               alt={`Uploaded PIUSI TOTAL meter reading for ${photo.registrationNumber}`}
             />
           )}
-          <div className="meter-review-status" role="status">
-            Photo stored privately for <strong>{photo.registrationNumber}</strong>.
-            OCR provider: <strong>{photo.ocrProvider || 'Unavailable'}</strong>.
-            OCR status: <strong>{photo.ocrStatus}</strong>.
-            {photo.ocrMessage && <p>{photo.ocrMessage}</p>}
-          </div>
+          <p role="status">
+            Original photo saved securely for {photo.registrationNumber}.
+          </p>
           <div className="meter-readings">
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
                 <span>Suggested Global Cumulative Total</span>
               </span>
-              <strong>
-                {formatOcrCumulativeTotal(photo)}
-                {photo.suggestedCumulativeTotalRawDigits &&
-                  suggestedCumulativeTotalConfidence(photo) != null &&
-                  ` (${Math.round(suggestedCumulativeTotalConfidence(photo))}% confidence)`}
-              </strong>
-              <small>
-                {photo.ocrProvider === 'google_vision'
-                  ? 'Google Vision'
-                  : photo.ocrProvider || 'OCR'} raw digits (retained):{' '}
-                {photo.ocrCumulativeTotalRawDigits || 'not detected'}.
-                {' '}OpenCV candidate:{' '}
-                {photo.ocrCumulativeTotalSegmentRawDigits || 'not detected'}.
-                {photo.ocrCumulativeTotalSegmentConfidence != null &&
-                  ` Segment confidence ${Math.round(photo.ocrCumulativeTotalSegmentConfidence)}%.`}
-              </small>
+              <strong>{formatOcrCumulativeTotal(photo)}</strong>
             </div>
           </div>
-          {photo.ocrWarnings?.length > 0 && (
-            <ul className="meter-ocr-warnings" aria-label="OCR warnings">
-              {photo.ocrWarnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
+          {(readingOcr || ['pending', 'processing'].includes(photo.ocrStatus)) && (
+            <p role="status" aria-live="polite">Reading meter...</p>
+          )}
+          {photo.ocrRequiresManualReview && !readingOcr && (
+            <p className="meter-ocr-warning" role="alert">
+              Please check all six TOTAL digits against the original photo.
+            </p>
+          )}
+          {['failed', 'unavailable'].includes(photo.ocrStatus) && !readingOcr && (
+            <button
+              className="outline-button"
+              type="button"
+              onClick={() => void retryPhotoOcr()}
+            >
+              Retry meter reading
+            </button>
           )}
           {photo.verifiedAt ? (
             <div className="meter-readings verified-readings" role="status">
@@ -915,11 +1194,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                 </small>
               </div>
               {photo.readingWarnings?.length > 0 && (
-                <ul className="meter-ocr-warnings" aria-label="Reading warnings">
-                  {photo.readingWarnings.map((warning) => (
-                    <li key={warning}>{warning}</li>
-                  ))}
-                </ul>
+                <p className="meter-ocr-warning" role="alert">
+                  This reading has validation notes. Contact an administrator if it needs review.
+                </p>
               )}
               <button
                 className="outline-button"
@@ -946,8 +1223,12 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                   minLength={6}
                   maxLength={6}
                   required
+                  disabled={readingOcr || verifying}
                   value={cumulativeTotalDraft}
-                  onChange={(event) => setCumulativeTotalDraft(event.target.value)}
+                  onChange={(event) => {
+                    setCumulativeTotalDraft(event.target.value);
+                    setCumulativeTotalEdited(true);
+                  }}
                   placeholder="e.g. 261563"
                 />
                 {formatRawMeterDigitsAsLitres(cumulativeTotalDraft) != null && (
@@ -970,6 +1251,12 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                       {readingPreview.previousTotalMilliLitres == null
                         ? 'not established'
                         : `${formatMilliLitres(readingPreview.previousTotalMilliLitres)} L`}
+                    </strong>
+                  </p>
+                  <p>
+                    New cumulative total:{' '}
+                    <strong>
+                      {formatRawMeterDigitsAsLitres(cumulativeTotalDraft)} L
                     </strong>
                   </p>
                   <p>
@@ -1009,7 +1296,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                 className="outline-button"
                 type="button"
                 onClick={startAnotherPhoto}
-                disabled={verifying}
+                disabled={verifying || readingOcr}
               >
                 Retake photo
               </button>
@@ -1693,19 +1980,7 @@ function formatOcrCumulativeTotal(photo) {
   if (photo.suggestedCumulativeTotalRawDigits) {
     return `${formatRawMeterDigitsAsLitres(photo.suggestedCumulativeTotalRawDigits)} litres`;
   }
-  return 'Manual review required';
-}
-
-function suggestedCumulativeTotalConfidence(photo) {
-  const suggestedDigits = photo.suggestedCumulativeTotalRawDigits;
-  if (
-    suggestedDigits &&
-    suggestedDigits === photo.ocrCumulativeTotalSegmentRawDigits &&
-    suggestedDigits !== photo.ocrCumulativeTotalRawDigits
-  ) {
-    return photo.ocrCumulativeTotalSegmentConfidence;
-  }
-  return photo.ocrCumulativeTotalConfidence;
+  return 'Check the TOTAL digits in the photo';
 }
 
 function cumulativeTotalDraftValue(photo) {

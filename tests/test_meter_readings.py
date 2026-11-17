@@ -269,8 +269,25 @@ class MeterReadingWorkflowTests(unittest.TestCase):
                 photo.id,
                 cumulative_total_raw_digits="261789",
             )
+            retry = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                cumulative_total_raw_digits="261789",
+            )
+            with self.assertRaisesRegex(
+                InvalidMeterVerification,
+                "already confirmed with a different TOTAL reading",
+            ):
+                verify_meter_photo(
+                    session,
+                    employee,
+                    photo.id,
+                    cumulative_total_raw_digits="261790",
+                )
 
             self.assertEqual(verified.ocr_cumulative_total_raw_digits, "261798")
+            self.assertIs(retry, verified)
             self.assertEqual(verified.cumulative_total_raw_digits, "261789")
             self.assertEqual(verified.cumulative_total_integer, 261789)
             self.assertEqual(verified.current_fill_milli_litres, 226)

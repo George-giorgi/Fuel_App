@@ -23,6 +23,7 @@ _SEGMENTS_BY_DIGIT = {
     "8": "abcdefg",
     "9": "abfgcd",
 }
+_MAX_OCR_IMAGE_SIDE = 3000
 _SEGMENT_REGIONS = {
     "a": (0.25, 0.03, 0.75, 0.22),
     "b": (0.67, 0.14, 0.95, 0.46),
@@ -91,7 +92,12 @@ def _crop_digit_group(
 
 def _load_oriented_image(content: bytes) -> np.ndarray:
     with Image.open(BytesIO(content)) as source:
-        image = ImageOps.exif_transpose(source).convert("RGB")
+        image = ImageOps.exif_transpose(source)
+        image.thumbnail(
+            (_MAX_OCR_IMAGE_SIDE, _MAX_OCR_IMAGE_SIDE),
+            Image.Resampling.LANCZOS,
+        )
+        image = image.convert("RGB")
     return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
 
@@ -209,6 +215,41 @@ def _group_components(
         (tuple(box) for box in boxes),
         key=lambda box: box[0],
     )
+
+
+def _merge_narrow_vertical_components(
+    boxes: list[tuple[int, int, int, int]],
+    row_height: int,
+) -> list[tuple[int, int, int, int]]:
+    merged = [list(box) for box in boxes]
+    changed = True
+    while changed:
+        changed = False
+        for index, first in enumerate(merged):
+            x1, y1, width1, height1 = first
+            for other_index in range(index + 1, len(merged)):
+                x2, y2, width2, height2 = merged[other_index]
+                overlap = min(x1 + width1, x2 + width2) - max(x1, x2)
+                if overlap < min(width1, width2) * 0.7:
+                    continue
+                gap = max(0, max(y1, y2) - min(y1 + height1, y2 + height2))
+                left = min(x1, x2)
+                top = min(y1, y2)
+                right = max(x1 + width1, x2 + width2)
+                bottom = max(y1 + height1, y2 + height2)
+                if (
+                    gap <= row_height * 0.2
+                    and max(width1, width2) <= row_height * 0.16
+                    and (right - left) / max(bottom - top, 1) <= 0.31
+                    and bottom - top >= row_height * 0.38
+                ):
+                    merged[index] = [left, top, right - left, bottom - top]
+                    merged.pop(other_index)
+                    changed = True
+                    break
+            if changed:
+                break
+    return [tuple(box) for box in merged]
 
 
 def _split_wide_glyphs(
@@ -361,6 +402,8 @@ def _recognize_row(
         boxes = _group_components(
             mask, x1, y1, minimum_area=max(18, round(row.size * 0.0007))
         )
+        if whole_number and expected_digits == 6:
+            boxes = _merge_narrow_vertical_components(boxes, row_height)
         if split_wide_glyphs:
             boxes = _split_wide_glyphs(boxes)
         boxes = [
@@ -378,7 +421,14 @@ def _recognize_row(
                 x1,
                 y1,
                 segment_threshold,
-                force_narrow_one=not whole_number,
+                force_narrow_one=(
+                    not whole_number
+                    or (
+                        whole_number
+                        and expected_digits == 6
+                        and box[2] / max(box[3], 1) <= 0.31
+                    )
+                ),
             )
             for box in boxes
         ]

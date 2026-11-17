@@ -43,15 +43,8 @@ class MeterPhotoRead(BaseModel):
     uploaded_at: datetime
     registration_number: str
     ocr_status: str
-    ocr_cumulative_total_litres: float | None
-    ocr_cumulative_total_confidence: float | None
-    ocr_provider: str | None
-    ocr_cumulative_total_raw_digits: str | None
-    ocr_cumulative_total_segment_raw_digits: str | None = None
     suggested_cumulative_total_raw_digits: str | None = None
-    ocr_cumulative_total_decimal_position: int | None
-    ocr_cumulative_total_segment_confidence: float | None
-    ocr_warnings: list[str] | None
+    ocr_requires_manual_review: bool = False
     reading_warnings: list[str] | None = None
     cumulative_total_manually_corrected: bool | None = None
     current_fill_litres: float | None
@@ -59,14 +52,12 @@ class MeterPhotoRead(BaseModel):
     current_fill_milli_litres: int | None = None
     cumulative_total_integer: int | None = None
     previous_global_total_integer: int | None = None
-    cumulative_total_raw_digits: str | None = None
     reading_source: str | None = None
     fill_source: str | None = None
     fill_calculation: str | None = None
     reconciliation_status: str | None = None
     verified_at: datetime | None
     verification_method: str | None
-    ocr_message: str | None
 
 
 class MeterPhotoVerify(BaseModel):

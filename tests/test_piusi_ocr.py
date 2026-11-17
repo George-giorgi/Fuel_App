@@ -2,6 +2,7 @@ import importlib
 import json
 from dataclasses import replace
 from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -20,6 +21,7 @@ from backend.app.services.meter_ocr import (
     _apply_piusi_evidence,
     _google_vision_text_detection_disagrees,
     _total_ocr_result,
+    extract_meter_readings,
     parse_meter_ocr_data,
 )
 from backend.app.services.piusi_lcd import (
@@ -93,6 +95,43 @@ class PiusiOcrTests(unittest.TestCase):
                 self.assertTrue(
                     any("exactly six digits" in warning for warning in result.warnings)
                 )
+
+    def test_total_ocr_does_not_convert_ambiguous_letters_to_digits(self) -> None:
+        result = _total_ocr_result("26I563", 96, "google_vision")
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.cumulative_total_raw_digits, "26563")
+        self.assertTrue(
+            any("exactly six digits" in warning for warning in result.warnings)
+        )
+
+    def test_meter_extraction_uses_only_total_row_recognition(self) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "FUEL_OCR_PROVIDER": "google_vision",
+                    "GOOGLE_CLOUD_VISION_API_KEY": "test-key",
+                },
+                clear=True,
+            ),
+            patch(
+                "backend.app.services.meter_ocr.recognize_piusi_total",
+                return_value=lcd,
+            ) as recognize_total,
+            patch(
+                "backend.app.services.meter_ocr.recognize_piusi_lcd",
+                side_effect=AssertionError("top-row OCR must not run"),
+            ),
+            patch(
+                "backend.app.services.meter_ocr._extract_google_vision_total",
+                return_value=MeterOcrResult(status="uncertain"),
+            ),
+        ):
+            extract_meter_readings(REFERENCE.read_bytes())
+
+        recognize_total.assert_called_once()
 
     def test_google_vision_uses_only_the_detected_total_row_crop(self) -> None:
         lcd = recognize_piusi_total(REFERENCE.read_bytes())
@@ -179,6 +218,72 @@ class PiusiOcrTests(unittest.TestCase):
             )
 
         self.assertIsNone(result.raw_digits)
+
+    def test_total_row_preserves_repeated_digits_and_leading_zeros(self) -> None:
+        segment_regions = {
+            "a": (0.25, 0.03, 0.75, 0.22),
+            "b": (0.67, 0.14, 0.95, 0.46),
+            "c": (0.67, 0.54, 0.95, 0.86),
+            "d": (0.25, 0.78, 0.75, 0.97),
+            "e": (0.05, 0.54, 0.33, 0.86),
+            "f": (0.05, 0.14, 0.33, 0.46),
+            "g": (0.25, 0.42, 0.75, 0.60),
+        }
+        segments_by_digit = {
+            "0": "abcdef",
+            "1": "bc",
+            "2": "abged",
+            "3": "abgcd",
+            "4": "fgbc",
+            "5": "afgcd",
+            "6": "afgecd",
+            "7": "abc",
+            "8": "abcdefg",
+            "9": "abfgcd",
+        }
+
+        for expected in ("000125", "111111", "270001", "261798"):
+            with self.subTest(expected=expected):
+                glyph_width = 100
+                glyph_gap = 30
+                row_height = 160
+                row_width = 24 + len(expected) * glyph_width + 5 * glyph_gap
+                display = np.full(
+                    (row_height, row_width, 3),
+                    (120, 185, 125),
+                    dtype=np.uint8,
+                )
+                for index, digit in enumerate(expected):
+                    x = 12 + index * (glyph_width + glyph_gap)
+                    for segment in segments_by_digit[digit]:
+                        left, top, right, bottom = segment_regions[segment]
+                        cv2.rectangle(
+                            display,
+                            (
+                                x + round(left * glyph_width),
+                                10 + round(top * 140),
+                            ),
+                            (
+                                x + round(right * glyph_width),
+                                10 + round(bottom * 140),
+                            ),
+                            (190, 40, 20),
+                            thickness=-1,
+                        )
+
+                result = piusi_lcd._recognize_row(
+                    display,
+                    (0, 0, 1, 1),
+                    minimum_digits=6,
+                    split_wide_glyphs=True,
+                    segment_threshold=0.45,
+                    whole_number=True,
+                    expected_digits=6,
+                    adaptive_masks=False,
+                    minimum_agreeing_masks=1,
+                )
+
+                self.assertEqual(result.raw_digits, expected)
 
     def test_low_light_crop_fallback_recognizes_labeled_total(self) -> None:
         image = (DATASET / "example_dark_60313_261798.jpeg").read_bytes()
@@ -291,6 +396,18 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(reconciled.status, "ready")
         self.assertEqual(reconciled.cumulative_total_litres, 261.563)
         self.assertEqual(reconciled.cumulative_total_suggested_raw_digits, "261563")
+
+    def test_large_photo_is_bounded_for_ocr_without_changing_labeled_digits(self) -> None:
+        image_buffer = BytesIO()
+        with Image.open(REFERENCE) as image:
+            image.resize(
+                (image.width * 3, image.height * 3),
+                Image.Resampling.LANCZOS,
+            ).save(image_buffer, format="JPEG", quality=95)
+
+        result = recognize_piusi_total(image_buffer.getvalue())
+
+        self.assertEqual(result.cumulative_total.raw_digits, "261563")
 
     def test_labeled_lcd_crops_match_digits_and_review_status(self) -> None:
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))

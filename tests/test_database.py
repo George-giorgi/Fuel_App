@@ -121,10 +121,10 @@ from backend.app.services.history_cleanup import clear_history
 from backend.app.services.meter_photos import (
     InvalidMeterVerification,
     InvalidQrSession,
-    UnsupportedMeterPhotoType,
     create_assigned_vehicle_photo_session,
     create_qr_session,
     create_vehicle_photo_session,
+    recognize_uploaded_meter_photo,
     store_meter_photo,
     validate_meter_photo,
     verify_meter_photo,
@@ -501,6 +501,11 @@ class DatabaseTests(unittest.TestCase):
                     session_token,
                     image_buffer.getvalue(),
                     "image/png",
+                )
+                photo = recognize_uploaded_meter_photo(
+                    session,
+                    employee,
+                    photo.id,
                 )
                 self.assertEqual(
                     photo.ocr_status,
@@ -1121,19 +1126,24 @@ class DatabaseTests(unittest.TestCase):
                             image_data,
                             "image/png",
                         )
+                        stored_photo = recognize_uploaded_meter_photo(
+                            session,
+                            employee,
+                            stored_photo.id,
+                        )
                     stored_path = Path(upload_directory) / stored_photo.storage_key
                     self.assertEqual(stored_registration, "AB12 CDE")
                     self.assertTrue(stored_path.is_file())
                     self.assertEqual(stored_path.stat().st_mode & 0o777, 0o600)
                     self.assertEqual(stored_photo.sha256, sha256(image_data).hexdigest())
-                    with self.assertRaises(InvalidQrSession):
-                        store_meter_photo(
-                            session,
-                            employee,
-                            session_token,
-                            image_data,
-                            "image/png",
-                        )
+                    retried_photo, _ = store_meter_photo(
+                        session,
+                        employee,
+                        session_token,
+                        image_data,
+                        "image/png",
+                    )
+                    self.assertEqual(retried_photo.id, stored_photo.id)
 
     def test_meter_photo_retrieval_is_limited_to_owner_or_management(self) -> None:
         image_buffer = BytesIO()
@@ -1238,9 +1248,13 @@ class DatabaseTests(unittest.TestCase):
                 create_assigned_vehicle_photo_session(session, unassigned_employee)
             )
 
-    def test_meter_photo_validation_rejects_unsupported_and_invalid_images(self) -> None:
-        with self.assertRaises(UnsupportedMeterPhotoType):
-            validate_meter_photo(b"not an image", "image/gif")
+    def test_meter_photo_validation_accepts_gif_and_rejects_invalid_images(self) -> None:
+        image_buffer = BytesIO()
+        Image.new("RGB", (4, 4), color="white").save(image_buffer, format="GIF")
+        self.assertEqual(
+            validate_meter_photo(image_buffer.getvalue(), "image/gif"),
+            ".gif",
+        )
         with self.assertRaises(ValueError):
             validate_meter_photo(b"not an image", "image/jpeg")
 
@@ -2018,6 +2032,11 @@ class DatabaseTests(unittest.TestCase):
                         session_token,
                         image_buffer.getvalue(),
                         "image/png",
+                    )
+                    photo = recognize_uploaded_meter_photo(
+                        session,
+                        boss,
+                        photo.id,
                     )
 
             verified_photo = verify_meter_photo(session, boss, photo.id)
@@ -2960,6 +2979,10 @@ class DatabaseTests(unittest.TestCase):
 
         route_paths = set(app.openapi()["paths"])
         self.assertIn("/api/meter-photos", route_paths)
+        self.assertIn(
+            "/api/meter-photos/{meter_photo_id}/recognize",
+            route_paths,
+        )
         self.assertIn("/api/meter-photos/{meter_photo_id}/verify", route_paths)
         self.assertIn("/api/fuel-records", route_paths)
         self.assertIn("/api/vehicles/me/fuel-records", route_paths)

@@ -1186,7 +1186,7 @@ def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
 def _total_ocr_result(
     text: str, confidence: float, provider: str
 ) -> MeterOcrResult:
-    raw_digits, _ = _raw_digits_and_decimal_position(text)
+    raw_digits = _ascii_digits(text)
     if raw_digits is None:
         return MeterOcrResult(
             status="uncertain",
@@ -1279,13 +1279,13 @@ def _extract_google_vision_total(
         )
     candidate_digits: set[str] = set()
     for _, candidate_text, _ in readings:
-        digits, _ = _raw_digits_and_decimal_position(candidate_text)
+        digits = _ascii_digits(candidate_text)
         if digits is not None:
             candidate_digits.add(digits)
     _, text, confidence = max(
         readings,
         key=lambda reading: (
-            len(_raw_digits_and_decimal_position(reading[1])[0] or ""),
+            len(_ascii_digits(reading[1]) or ""),
             reading[2],
         ),
     )

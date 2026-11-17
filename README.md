@@ -262,7 +262,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   select another active vehicle from the fleet. Vehicles may be shared by multiple
   employees. Sessions expire after 10 minutes; the QR-session API remains
   available for QR-based clients.
-- Meter-photo uploads accept verified JPEG/PNG images up to 10 MB. Files are
+- Meter-photo uploads accept verified raster-image formats supported by the
+  image decoder (including JPEG, PNG, GIF, BMP, TIFF, WebP, and AVIF), plus
+  HEIC/HEIF originals, up to 10 MB. The browser prepares a JPEG processing copy
+  for formats other than JPEG/PNG while preserving the original. Files are
   written with private local permissions under `uploads/meter-photos/`; the
   directory is not mounted or served as static content. SQLite stores only
   photo metadata and a private storage key.

@@ -29,12 +29,14 @@ from backend.app.schemas.meter_photo import (
 )
 from backend.app.services.meter_photos import (
     InvalidMeterVerification,
+    MAX_METER_OCR_PHOTO_BYTES,
     MAX_METER_PHOTO_BYTES,
     InvalidMeterPhoto,
     InvalidQrSession,
     UnsupportedMeterPhotoType,
     create_vehicle_photo_session,
     create_qr_session,
+    recognize_uploaded_meter_photo,
     store_meter_photo,
     verify_meter_photo,
 )
@@ -119,7 +121,6 @@ def upload_meter_photo(
         raise HTTPException(
             status_code=413, detail="Meter photos must be 10 MB or smaller."
         )
-
     try:
         stored_photo, registration_number = store_meter_photo(
             session,
@@ -181,6 +182,57 @@ def read_meter_photo_content(
     )
 
 
+@router.post(
+    "/api/meter-photos/{meter_photo_id}/recognize",
+    response_model=MeterPhotoRead,
+)
+def recognize_meter_photo(
+    meter_photo_id: int,
+    response: Response,
+    session: Annotated[Session, Depends(get_db_session)],
+    employee: Annotated[Employee, Depends(get_current_employee)],
+    processing_photo: Annotated[UploadFile | None, File()] = None,
+) -> MeterPhotoRead:
+    processing_content = None
+    processing_content_type = None
+    if processing_photo is not None:
+        processing_content = processing_photo.file.read(
+            MAX_METER_OCR_PHOTO_BYTES + 1
+        )
+        if len(processing_content) > MAX_METER_OCR_PHOTO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Optimized OCR photos must be 8 MB or smaller.",
+            )
+        processing_content_type = processing_photo.content_type
+
+    try:
+        meter_photo = recognize_uploaded_meter_photo(
+            session,
+            employee,
+            meter_photo_id,
+            processing_content,
+            processing_content_type,
+        )
+    except PhotoStorageError as error:
+        logger.exception("Could not retrieve an uploaded meter photo for OCR.")
+        raise HTTPException(
+            status_code=503,
+            detail="Photo storage is temporarily unavailable.",
+        ) from error
+    except UnsupportedMeterPhotoType as error:
+        raise HTTPException(status_code=415, detail=str(error)) from error
+    except InvalidMeterPhoto as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if meter_photo is None:
+        raise HTTPException(status_code=404, detail="Meter photo not found.")
+    vehicle = get_vehicle_by_id(session, meter_photo.vehicle_id)
+    if vehicle is None:
+        raise HTTPException(status_code=404, detail="Meter photo vehicle not found.")
+    response.headers["Cache-Control"] = "no-store"
+    return _meter_photo_read(meter_photo, vehicle.registration_number)
+
+
 @router.patch(
     "/api/meter-photos/{meter_photo_id}/verify",
     response_model=MeterPhotoRead,
@@ -221,25 +273,13 @@ def _meter_photo_read(
         uploaded_at=meter_photo.uploaded_at,
         registration_number=registration_number,
         ocr_status=meter_photo.ocr_status,
-        ocr_cumulative_total_litres=meter_photo.ocr_cumulative_total_litres,
-        ocr_cumulative_total_confidence=meter_photo.ocr_cumulative_total_confidence,
-        ocr_provider=meter_photo.ocr_provider,
-        ocr_cumulative_total_raw_digits=(
-            meter_photo.ocr_cumulative_total_raw_digits
-        ),
-        ocr_cumulative_total_segment_raw_digits=(
-            meter_photo.ocr_cumulative_total_segment_raw_digits
-        ),
         suggested_cumulative_total_raw_digits=(
             meter_photo.suggested_cumulative_total_raw_digits
         ),
-        ocr_cumulative_total_decimal_position=(
-            meter_photo.ocr_cumulative_total_decimal_position
+        ocr_requires_manual_review=(
+            meter_photo.ocr_status not in {"ready", "skipped"}
+            or bool(meter_photo.ocr_warnings)
         ),
-        ocr_cumulative_total_segment_confidence=(
-            meter_photo.ocr_cumulative_total_segment_confidence
-        ),
-        ocr_warnings=meter_photo.ocr_warnings,
         reading_warnings=meter_photo.reading_warnings,
         cumulative_total_manually_corrected=(
             meter_photo.cumulative_total_manually_corrected
@@ -249,11 +289,9 @@ def _meter_photo_read(
         current_fill_milli_litres=meter_photo.current_fill_milli_litres,
         cumulative_total_integer=meter_photo.cumulative_total_integer,
         previous_global_total_integer=meter_photo.previous_global_total_integer,
-        cumulative_total_raw_digits=meter_photo.cumulative_total_raw_digits,
         reading_source=meter_photo.reading_source,
         fill_calculation=meter_photo.fill_calculation,
         reconciliation_status=meter_photo.reconciliation_status,
         verified_at=meter_photo.verified_at,
         verification_method=meter_photo.verification_method,
-        ocr_message=meter_photo.ocr_message,
     )

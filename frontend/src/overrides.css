@@ -243,6 +243,10 @@
   gap: 10px;
 }
 
+.meter-photo-file-input {
+  display: none;
+}
+
 .vehicle-qr-list {
   display: grid;
   gap: 10px;
@@ -3634,6 +3638,16 @@ select:focus-visible {
   border-radius: 8px;
   color: var(--ink);
   font-size: 10px;
+  line-height: 1.45;
+}
+
+.meter-ocr-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--orange);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 11px;
   line-height: 1.45;
 }
 

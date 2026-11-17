@@ -291,12 +291,87 @@ export function startMeterPhotoSession(vehicleId = null) {
   });
 }
 
-export function uploadMeterPhoto(sessionToken, photo, readingMode = 'ocr') {
-  const body = new FormData();
-  body.append('session_token', sessionToken);
-  body.append('photo', photo);
-  body.append('reading_mode', readingMode);
-  return apiRequest('/api/meter-photos', { method: 'POST', body });
+export function uploadMeterPhoto(
+  sessionToken,
+  photo,
+  readingMode = 'ocr',
+  onProgress = () => {}
+) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    const path = '/api/meter-photos';
+    const body = new FormData();
+    body.append('session_token', sessionToken);
+    body.append('photo', photo);
+    body.append('reading_mode', readingMode);
+
+    request.open('POST', apiUrl(path));
+    request.withCredentials = true;
+    request.timeout = 120000;
+    request.setRequestHeader('Accept', 'application/json');
+    request.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    });
+    request.addEventListener('load', () => {
+      let result = null;
+      if (request.responseText) {
+        try {
+          result = JSON.parse(request.responseText);
+        } catch (error) {
+          if (request.status >= 200 && request.status < 300) {
+            reject(error);
+            return;
+          }
+        }
+      }
+      if (request.status >= 200 && request.status < 300) {
+        resolve(result);
+        return;
+      }
+      const requestError = new Error(
+        formatErrorDetail(result?.detail) ||
+          `Request failed (${request.status})`
+      );
+      requestError.status = request.status;
+      requestError.path = path;
+      reject(requestError);
+    });
+    request.addEventListener('error', () => {
+      reject(new Error('Connection interrupted during upload. Check the connection and retry.'));
+    });
+    request.addEventListener('timeout', () => {
+      reject(new Error('Photo upload timed out. Check the connection and retry.'));
+    });
+    request.send(body);
+  });
+}
+
+export function recognizeMeterPhoto(meterPhotoId, processingPhoto = null) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+  const options = {
+    method: 'POST',
+    signal: controller.signal
+  };
+  if (processingPhoto) {
+    const body = new FormData();
+    body.append('processing_photo', processingPhoto);
+    options.body = body;
+  }
+  return apiRequest(`/api/meter-photos/${meterPhotoId}/recognize`, {
+    ...options
+  }).catch((requestError) => {
+    if (controller.signal.aborted) {
+      throw new Error(
+        'Reading is taking longer than expected. The photo is saved; retry safely.'
+      );
+    }
+    throw requestError;
+  }).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
 }
 
 export function verifyMeterPhoto(meterPhotoId, readings) {
