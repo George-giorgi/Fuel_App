@@ -1426,18 +1426,8 @@ def _apply_piusi_total_evidence(
         warnings.append(
             "OpenCV must return exactly six TOTAL-row digits; check for missing or extra digits."
         )
-    if ocr_is_complete and segment_is_complete:
-        if ocr_digits == segment_digits:
-            suggested_digits = ocr_digits
-    elif ocr_is_complete:
+    if ocr_is_complete:
         suggested_digits = ocr_digits
-    elif (
-        segment_is_complete
-        and segment.confidence is not None
-        and segment.confidence >= 0.75
-    ):
-        suggested_digits = segment_digits
-
     if segment_digits is not None and segment.confidence is not None:
         if segment.confidence < 0.55:
             warnings.append("OpenCV TOTAL-row confidence is low.")

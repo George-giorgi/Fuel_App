@@ -48,7 +48,9 @@ def _candidate_ocr_result() -> MeterOcrResult:
 
 
 class PiusiOcrTests(unittest.TestCase):
-    def test_incomplete_vision_uses_complete_segment_candidate_for_review(self) -> None:
+    def test_incomplete_vision_does_not_promote_a_conflicting_segment_candidate(
+        self,
+    ) -> None:
         lcd = recognize_piusi_total(REFERENCE.read_bytes())
         result = _apply_piusi_total_evidence(
             MeterOcrResult(
@@ -64,7 +66,7 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.status, "uncertain")
         self.assertEqual(result.cumulative_total_raw_digits, "1663")
         self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
-        self.assertEqual(result.cumulative_total_suggested_raw_digits, "261563")
+        self.assertIsNone(result.cumulative_total_suggested_raw_digits)
         self.assertEqual(result.cumulative_total_litres, 1.663)
         self.assertTrue(any("disagree" in warning for warning in result.warnings))
 
@@ -81,9 +83,10 @@ class PiusiOcrTests(unittest.TestCase):
             "google_vision",
         )
 
+        self.assertEqual(result.status, "uncertain")
         self.assertEqual(result.cumulative_total_raw_digits, "267981")
         self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
-        self.assertIsNone(result.cumulative_total_suggested_raw_digits)
+        self.assertEqual(result.cumulative_total_suggested_raw_digits, "267981")
         self.assertTrue(any("disagree" in warning for warning in result.warnings))
 
     def test_ocr_candidate_requires_exactly_six_digits(self) -> None:
@@ -397,6 +400,27 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(reconciled.cumulative_total_litres, 261.563)
         self.assertEqual(reconciled.cumulative_total_suggested_raw_digits, "261563")
 
+    def test_total_row_crop_keeps_the_complete_vision_area(self) -> None:
+        result = recognize_piusi_total(REFERENCE.read_bytes())
+        display = cv2.imdecode(
+            np.frombuffer(result.display_crop, dtype=np.uint8),
+            cv2.IMREAD_COLOR,
+        )
+        total_row = cv2.imdecode(
+            np.frombuffer(result.total_row_crop, dtype=np.uint8),
+            cv2.IMREAD_COLOR,
+        )
+        height, width = display.shape[:2]
+
+        self.assertEqual(
+            total_row.shape[1],
+            round(width * 0.82) - round(width * 0.10),
+        )
+        self.assertEqual(
+            total_row.shape[0],
+            round(height * 0.96) - round(height * 0.58),
+        )
+
     def test_large_photo_is_bounded_for_ocr_without_changing_labeled_digits(self) -> None:
         image_buffer = BytesIO()
         with Image.open(REFERENCE) as image:
@@ -448,7 +472,7 @@ class PiusiOcrTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     reconciled.cumulative_total_suggested_raw_digits,
-                    expected_digits if vision_digits == expected_digits else None,
+                    vision_digits if len(vision_digits) == 6 else None,
                 )
 
     def test_cumulative_row_uses_adaptive_threshold_when_color_is_absent(self) -> None:

@@ -24,6 +24,7 @@ _SEGMENTS_BY_DIGIT = {
     "9": "abfgcd",
 }
 _MAX_OCR_IMAGE_SIDE = 3000
+_PIUSI_TOTAL_ROW_BOUNDS = (0.10, 0.58, 0.82, 0.96)
 _SEGMENT_REGIONS = {
     "a": (0.25, 0.03, 0.75, 0.22),
     "b": (0.67, 0.14, 0.95, 0.46),
@@ -71,6 +72,19 @@ def _encode_jpeg(image: np.ndarray) -> bytes:
     if not success:
         raise ValueError("Could not encode the detected PIUSI display.")
     return encoded.tobytes()
+
+
+def _total_row_crop(display: np.ndarray) -> np.ndarray:
+    height = display.shape[0]
+    width = display.shape[1]
+    return display[
+        round(height * _PIUSI_TOTAL_ROW_BOUNDS[1]) : round(
+            height * _PIUSI_TOTAL_ROW_BOUNDS[3]
+        ),
+        round(width * _PIUSI_TOTAL_ROW_BOUNDS[0]) : round(
+            width * _PIUSI_TOTAL_ROW_BOUNDS[2]
+        ),
+    ]
 
 
 def _crop_digit_group(
@@ -642,22 +656,34 @@ def _search_low_light_total_row(
     tuple[str, ...],
 ]:
     candidates = []
+    displays = []
     for saturation_floor in (10, 15):
-        display = _lcd_candidate(
-            image,
-            saturation_floor=saturation_floor,
-            value_floor=110,
-        )
-        if display is None:
-            continue
-        reading, row_crop, ambiguous = _search_row_windows(
-            display,
-            total_row=True,
-        )
-        if reading is not None and row_crop is not None:
-            candidates.append((reading, display, row_crop, ambiguous))
+        for value_floor in (110, 90, 70):
+            display = _lcd_candidate(
+                image,
+                saturation_floor=saturation_floor,
+                value_floor=value_floor,
+            )
+            if display is None:
+                continue
+            displays.append(display)
+            reading, row_crop, ambiguous = _search_row_windows(
+                display,
+                total_row=True,
+            )
+            if reading is not None and row_crop is not None:
+                candidates.append((reading, display, row_crop, ambiguous))
+                break
 
     if not candidates:
+        if displays:
+            display = max(displays, key=lambda item: item.shape[0] * item.shape[1])
+            return (
+                None,
+                display,
+                _total_row_crop(display),
+                ("OpenCV could not verify all six TOTAL-row digits.",),
+            )
         return None, None, None, ()
 
     digits = {
@@ -681,7 +707,7 @@ def _search_low_light_total_row(
         warnings.append(
             "Low-light OpenCV row crops are ambiguous; manual review is required."
         )
-    return best[0], best[1], best[2], tuple(warnings)
+    return best[0], best[1], _total_row_crop(best[1]), tuple(warnings)
 
 
 def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
@@ -795,7 +821,9 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
         total, low_light_display, row_crop, low_light_warnings = (
             _search_low_light_total_row(image)
         )
-        if total is not None and low_light_display is not None and row_crop is not None:
+        if low_light_display is not None and row_crop is not None:
+            if total is None:
+                total = LcdRowReading(None, None, None, None)
             return PiusiTotalRecognition(
                 True,
                 total,
@@ -812,12 +840,9 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
             ("Could not locate the PIUSI LCD display.",),
         )
 
-    height, width = display.shape[:2]
+    height = display.shape[0]
     bounds = (0.15, 0.65, 0.95, 0.96)
-    total_row = display[
-        round(height * bounds[1]) : round(height * bounds[3]),
-        round(width * bounds[0]) : round(width * bounds[2]),
-    ]
+    total_row = _total_row_crop(display)
     total = _recognize_row(
         display,
         bounds,
@@ -828,12 +853,9 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
         expected_digits=6,
         mask_right_fraction=0.71,
     )
-    digit_crop = _crop_digit_group(display, total)
-    if digit_crop is not None:
-        total_row = digit_crop
     warnings = []
     if total.raw_digits is None or height <= 100:
-        alternative, crop, ambiguous = _search_row_windows(
+        alternative, _, ambiguous = _search_row_windows(
             display, total_row=True
         )
         if alternative is not None:
@@ -845,8 +867,6 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
                     "Primary and alternate TOTAL-row crops disagree; manual review is required."
                 )
             total = alternative
-            if crop is not None:
-                total_row = crop
             if ambiguous:
                 warnings.append(
                     "Alternate TOTAL-row crops disagree; manual review is required."
