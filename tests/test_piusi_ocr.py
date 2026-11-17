@@ -180,6 +180,35 @@ class PiusiOcrTests(unittest.TestCase):
 
         self.assertIsNone(result.raw_digits)
 
+    def test_low_light_crop_fallback_recognizes_labeled_total(self) -> None:
+        image = (DATASET / "example_dark_60313_261798.jpeg").read_bytes()
+        original_candidate = piusi_lcd._lcd_candidate
+
+        def low_light_only(
+            source: np.ndarray,
+            *,
+            saturation_floor: int = 35,
+            value_floor: int = 140,
+        ) -> np.ndarray | None:
+            if value_floor != 110:
+                return None
+            return original_candidate(
+                source,
+                saturation_floor=saturation_floor,
+                value_floor=value_floor,
+            )
+
+        with patch.object(
+            piusi_lcd,
+            "_lcd_candidate",
+            side_effect=low_light_only,
+        ):
+            result = recognize_piusi_total(image)
+
+        self.assertEqual(result.cumulative_total.raw_digits, "261798")
+        self.assertEqual(len(result.cumulative_total.raw_digits), 6)
+        self.assertTrue(result.total_row_crop)
+
     def test_current_fill_rejects_a_truncated_three_digit_reading(self) -> None:
         display = np.zeros((100, 200, 3), dtype=np.uint8)
         boxes = [

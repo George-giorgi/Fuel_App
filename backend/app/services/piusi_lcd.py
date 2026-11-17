@@ -40,6 +40,7 @@ class LcdRowReading:
     decimal_position: int | None
     value: Decimal | int | None
     confidence: float | None
+    digit_bounds: tuple[int, int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,23 @@ def _encode_jpeg(image: np.ndarray) -> bytes:
     return encoded.tobytes()
 
 
+def _crop_digit_group(
+    image: np.ndarray,
+    reading: LcdRowReading,
+) -> np.ndarray | None:
+    if reading.digit_bounds is None:
+        return None
+    left, top, right, bottom = reading.digit_bounds
+    padding_x = max(2, round((bottom - top) * 0.08))
+    padding_y = max(2, round((bottom - top) * 0.08))
+    height, width = image.shape[:2]
+    crop = image[
+        max(0, top - padding_y) : min(height, bottom + padding_y),
+        max(0, left - padding_x) : min(width, right + padding_x),
+    ]
+    return crop if crop.size else None
+
+
 def _load_oriented_image(content: bytes) -> np.ndarray:
     with Image.open(BytesIO(content)) as source:
         image = ImageOps.exif_transpose(source).convert("RGB")
@@ -78,12 +96,13 @@ def _load_oriented_image(content: bytes) -> np.ndarray:
 
 
 def _lcd_candidate(
-    image: np.ndarray, *, saturation_floor: int = 35
+    image: np.ndarray, *, saturation_floor: int = 35, value_floor: int = 140
 ) -> np.ndarray | None:
     height, width = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     lower_bound = _LCD_HSV_LOW.copy()
     lower_bound[1] = saturation_floor
+    lower_bound[2] = value_floor
     mask = cv2.inRange(hsv, lower_bound, _LCD_HSV_HIGH)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 13))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
@@ -381,6 +400,12 @@ def _recognize_row(
             digit for digit, _ in classified if digit is not None
         )
         confidence = sum(score for _, score in classified) / len(classified)
+        digit_bounds = (
+            min(box[0] for box in boxes),
+            min(box[1] for box in boxes),
+            max(box[0] + box[2] for box in boxes),
+            max(box[1] + box[3] for box in boxes),
+        )
         decimal_position = (
             max(0, len(raw_digits) - 3)
             if whole_number
@@ -396,7 +421,13 @@ def _recognize_row(
                 )
             except InvalidOperation:
                 value = None
-        return LcdRowReading(raw_digits, decimal_position, value, confidence)
+        return LcdRowReading(
+            raw_digits,
+            decimal_position,
+            value,
+            confidence,
+            digit_bounds,
+        )
 
     masks = [cv2.inRange(hsv, _SEGMENT_HSV_LOW, _SEGMENT_HSV_HIGH)]
     if whole_number and adaptive_masks:
@@ -509,8 +540,14 @@ def _search_row_windows(
                     y1 = round(scaled_height * bounds[1])
                     x2 = round(scaled_width * bounds[2])
                     y2 = round(scaled_height * bounds[3])
+                    digit_crop = _crop_digit_group(scaled_display, reading)
                     candidates.append(
-                        (reading, scaled_display[y1:y2, x1:x2])
+                        (
+                            reading,
+                            digit_crop
+                            if digit_crop is not None
+                            else scaled_display[y1:y2, x1:x2],
+                        )
                     )
 
     if not candidates:
@@ -544,6 +581,57 @@ def _search_row_windows(
         and counts[ranked_digits[1]] >= counts[ranked_digits[0]] * 0.75
     )
     return best_reading, best_crop, ambiguous
+
+
+def _search_low_light_total_row(
+    image: np.ndarray,
+) -> tuple[
+    LcdRowReading | None,
+    np.ndarray | None,
+    np.ndarray | None,
+    tuple[str, ...],
+]:
+    candidates = []
+    for saturation_floor in (10, 15):
+        display = _lcd_candidate(
+            image,
+            saturation_floor=saturation_floor,
+            value_floor=110,
+        )
+        if display is None:
+            continue
+        reading, row_crop, ambiguous = _search_row_windows(
+            display,
+            total_row=True,
+        )
+        if reading is not None and row_crop is not None:
+            candidates.append((reading, display, row_crop, ambiguous))
+
+    if not candidates:
+        return None, None, None, ()
+
+    digits = {
+        candidate[0].raw_digits
+        for candidate in candidates
+        if candidate[0].raw_digits is not None
+    }
+    best = max(candidates, key=lambda candidate: candidate[0].confidence or 0)
+    warnings = []
+    if len(digits) > 1:
+        warnings.append(
+            "Low-light OpenCV crops disagree on TOTAL digits "
+            f"({', '.join(sorted(digits))}); manual review is required."
+        )
+    elif len(candidates) < 2:
+        warnings.append(
+            "Only one low-light OpenCV crop found a TOTAL candidate; "
+            "manual review is required."
+        )
+    if any(candidate[3] for candidate in candidates):
+        warnings.append(
+            "Low-light OpenCV row crops are ambiguous; manual review is required."
+        )
+    return best[0], best[1], best[2], tuple(warnings)
 
 
 def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
@@ -654,6 +742,17 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
     if display is None:
         display = _lcd_candidate(image, saturation_floor=25)
     if display is None:
+        total, low_light_display, row_crop, low_light_warnings = (
+            _search_low_light_total_row(image)
+        )
+        if total is not None and low_light_display is not None and row_crop is not None:
+            return PiusiTotalRecognition(
+                True,
+                total,
+                _encode_jpeg(low_light_display),
+                _encode_jpeg(row_crop),
+                low_light_warnings,
+            )
         missing = LcdRowReading(None, None, None, None)
         return PiusiTotalRecognition(
             False,
@@ -679,6 +778,9 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
         expected_digits=6,
         mask_right_fraction=0.71,
     )
+    digit_crop = _crop_digit_group(display, total)
+    if digit_crop is not None:
+        total_row = digit_crop
     warnings = []
     if total.raw_digits is None or height <= 100:
         alternative, crop, ambiguous = _search_row_windows(
@@ -700,6 +802,24 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
                     "Alternate TOTAL-row crops disagree; manual review is required."
                 )
     if total.raw_digits is None:
+        (
+            low_light_total,
+            low_light_display,
+            low_light_crop,
+            low_light_warnings,
+        ) = _search_low_light_total_row(image)
+        if (
+            low_light_total is not None
+            and low_light_display is not None
+            and low_light_crop is not None
+        ):
+            return PiusiTotalRecognition(
+                True,
+                low_light_total,
+                _encode_jpeg(low_light_display),
+                _encode_jpeg(low_light_crop),
+                low_light_warnings,
+            )
         warnings.append("Seven-segment recognition could not read the TOTAL row.")
     return PiusiTotalRecognition(
         True,

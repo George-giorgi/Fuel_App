@@ -597,6 +597,30 @@ export default function BossDashboard({
     });
   }
 
+  function handleDashboardTabKeyDown(event) {
+    const views = ['summary', 'fuel'];
+    const currentIndex = views.indexOf(activeView);
+    const nextView =
+      event.key === 'ArrowRight'
+        ? views[(currentIndex + 1) % views.length]
+        : event.key === 'ArrowLeft'
+          ? views[(currentIndex - 1 + views.length) % views.length]
+          : event.key === 'Home'
+            ? views[0]
+            : event.key === 'End'
+              ? views[views.length - 1]
+              : null;
+
+    if (!nextView) return;
+    event.preventDefault();
+    switchDashboardView(nextView);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(nextView === 'summary' ? 'bossSummaryTab' : 'bossFuelTab')
+        ?.focus();
+    });
+  }
+
   async function refreshAll() {
     setEmployeeRefreshKey((current) => current + 1);
     await Promise.all([
@@ -659,28 +683,47 @@ export default function BossDashboard({
           </div>
         </div>
         {renderFuelEntry && (
-          <div className="boss-dashboard-tabs" role="tablist" aria-label="Boss dashboard">
+          <div
+            className="boss-dashboard-tabs"
+            role="tablist"
+            aria-label="Dashboard view"
+            onKeyDown={handleDashboardTabKeyDown}
+          >
             <button
               id="bossSummaryTab"
               type="button"
               role="tab"
+              tabIndex={activeView === 'summary' ? 0 : -1}
               aria-selected={activeView === 'summary'}
               aria-controls="bossSummaryPanel"
               className={activeView === 'summary' ? 'active' : ''}
               onClick={() => switchDashboardView('summary')}
             >
-              Fleet summary
+              <span className="boss-dashboard-tab-icon" aria-hidden="true">
+                <Icon name="gauge" size={17} />
+              </span>
+              <span className="boss-dashboard-tab-copy">
+                <strong>Fleet overview</strong>
+                <small>Activity, vehicles &amp; spending</small>
+              </span>
             </button>
             <button
               id="bossFuelTab"
               type="button"
               role="tab"
+              tabIndex={activeView === 'fuel' ? 0 : -1}
               aria-selected={activeView === 'fuel'}
               aria-controls="bossFuelPanel"
               className={activeView === 'fuel' ? 'active' : ''}
               onClick={() => switchDashboardView('fuel')}
             >
-              New fill
+              <span className="boss-dashboard-tab-icon" aria-hidden="true">
+                <Icon name="fuel" size={17} />
+              </span>
+              <span className="boss-dashboard-tab-copy">
+                <strong>Record a fuel fill</strong>
+                <small>Enter a new fuel purchase</small>
+              </span>
             </button>
           </div>
         )}

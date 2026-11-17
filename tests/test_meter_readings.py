@@ -47,9 +47,13 @@ class MeterReadingConversionTests(unittest.TestCase):
     def test_total_raw_digits_use_three_decimal_places(self) -> None:
         for raw_digits, expected in (
             ("000000", Decimal("0.000")),
+            ("001111", Decimal("1.111")),
             ("261563", Decimal("261.563")),
             ("261798", Decimal("261.798")),
+            ("261856", Decimal("261.856")),
             ("267981", Decimal("267.981")),
+            ("270001", Decimal("270.001")),
+            ("888888", Decimal("888.888")),
         ):
             with self.subTest(raw_digits=raw_digits):
                 self.assertEqual(parse_total_raw_digits(raw_digits), int(raw_digits))

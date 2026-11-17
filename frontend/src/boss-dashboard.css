@@ -1,5 +1,6 @@
 .boss-dashboard {
   min-height: 100vh;
+  scroll-margin-top: 88px;
   background:
     radial-gradient(ellipse at 75% -12%, color-mix(in srgb, var(--teal) 10%, transparent), transparent 42%),
     var(--paper);
@@ -104,8 +105,13 @@
 }
 
 .boss-dashboard-tabs button {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 9px;
   min-height: 34px;
-  padding: 0 12px;
+  min-width: 0;
+  padding: 6px 12px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -114,13 +120,53 @@
   font: inherit;
   font-size: 11px;
   font-weight: 700;
-  white-space: nowrap;
+  text-align: left;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+.boss-dashboard-tab-icon {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--teal);
+}
+
+.boss-dashboard-tab-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.boss-dashboard-tab-copy strong {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.boss-dashboard-tab-copy small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.25;
 }
 
 .boss-dashboard-tabs button.active {
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 4px #00000012;
+  box-shadow: 0 2px 7px #00000012, inset 0 0 0 1px color-mix(in srgb, var(--teal) 35%, transparent);
+}
+
+.boss-dashboard-tabs button.active .boss-dashboard-tab-icon {
+  border-color: color-mix(in srgb, var(--teal) 32%, var(--line));
+  background: color-mix(in srgb, var(--teal) 9%, var(--surface));
+}
+
+.boss-dashboard-tabs button:hover:not(.active) {
+  background: color-mix(in srgb, var(--teal) 6%, transparent);
 }
 
 .boss-dashboard-tabs button:focus-visible {
@@ -2317,6 +2363,22 @@
 
   .boss-dashboard-tabs button {
     flex: 1 1 0;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .boss-dashboard-tab-icon {
+    flex-basis: 27px;
+    width: 27px;
+    height: 27px;
+  }
+
+  .boss-dashboard-tab-copy strong {
+    font-size: 10px;
+  }
+
+  .boss-dashboard-tab-copy small {
+    font-size: 8px;
   }
 
   .boss-header-nav {
