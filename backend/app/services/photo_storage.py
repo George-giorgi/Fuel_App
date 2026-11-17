@@ -5,6 +5,7 @@ import secrets
 from pathlib import Path
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from backend.app.core.config import METER_PHOTO_DIRECTORY
@@ -66,6 +67,11 @@ def _r2_client():
         region_name="auto",
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
+        config=Config(
+            connect_timeout=5,
+            read_timeout=15,
+            retries={"max_attempts": 2, "mode": "standard"},
+        ),
     )
 
 
@@ -186,3 +192,44 @@ def delete_photo(storage_key: str) -> None:
     status_code = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
     if status_code is not None and not 200 <= status_code < 300:
         raise PhotoStorageError("R2 did not confirm that the meter photo was deleted.")
+
+
+def delete_photos(storage_keys: list[str]) -> None:
+    if not storage_keys:
+        return
+
+    for storage_key in storage_keys:
+        if not storage_key or Path(storage_key).name != storage_key:
+            raise PhotoStorageError("The stored meter photo reference is invalid.")
+
+    if get_photo_storage_backend() == "local":
+        for storage_key in storage_keys:
+            delete_photo(storage_key)
+        return
+
+    bucket_name = _r2_bucket_name()
+    client = _r2_client()
+    for offset in range(0, len(storage_keys), 1000):
+        batch = storage_keys[offset : offset + 1000]
+        try:
+            response = client.delete_objects(
+                Bucket=bucket_name,
+                Delete={
+                    "Objects": [{"Key": key} for key in batch],
+                    "Quiet": True,
+                },
+            )
+        except (BotoCoreError, ClientError, OSError) as error:
+            raise PhotoStorageError(
+                "Could not delete the stored meter photos from R2."
+            ) from error
+
+        status_code = response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if status_code is not None and not 200 <= status_code < 300:
+            raise PhotoStorageError(
+                "R2 did not confirm that the meter photos were deleted."
+            )
+        if response.get("Errors"):
+            raise PhotoStorageError(
+                "R2 could not delete all stored meter photos."
+            )

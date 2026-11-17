@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import require_admin, require_management
 from backend.app.db.session import get_db_session
-from backend.app.models import Employee, FuelRecord, Vehicle
+from backend.app.models import Employee, FuelRecord, MeterPhoto, Vehicle
 from backend.app.repositories.fuel_records import get_latest_vehicle_odometer
 from backend.app.repositories.vehicles import get_vehicle_by_id
 from backend.app.schemas import FuelRecordRead
@@ -54,7 +54,7 @@ from backend.app.services.nct import (
     list_vehicle_nct,
     update_vehicle_nct,
 )
-from backend.app.services.photo_storage import PhotoStorageError, delete_photo
+from backend.app.services.photo_storage import PhotoStorageError, delete_photos
 
 
 logger = logging.getLogger(__name__)
@@ -151,16 +151,18 @@ def clear_admin_operational_data(
     session: Annotated[Session, Depends(get_db_session)],
     _: Annotated[Employee, Depends(require_admin)],
 ) -> AdminOperationalDataClearRead:
-    photo_keys = clear_operational_data(session)
+    photo_keys = list(
+        session.scalars(select(MeterPhoto.storage_key)).all()
+    )
     try:
-        for storage_key in photo_keys:
-            delete_photo(storage_key)
+        delete_photos(photo_keys)
     except PhotoStorageError as error:
-        logger.exception("Could not remove a meter photo during data cleanup.")
+        logger.exception("Could not remove meter photos during data cleanup.")
         raise HTTPException(
             status_code=503,
             detail="Could not delete all stored meter photos. No database records were cleared; retry the cleanup.",
         ) from error
+    clear_operational_data(session)
 
     return AdminOperationalDataClearRead(
         message="Operational records cleared. All users and vehicles were retained.",

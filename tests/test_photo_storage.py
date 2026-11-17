@@ -97,6 +97,47 @@ class PhotoStorageTests(unittest.TestCase):
             Key="meter-photo.jpg",
         )
 
+    def test_r2_photo_cleanup_deletes_in_batches_of_one_thousand(self) -> None:
+        fake_client = Mock()
+        fake_client.delete_objects.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200}
+        }
+        keys = [f"meter-photo-{index}.jpg" for index in range(1001)]
+        with patch.dict(
+            os.environ,
+            {
+                "FUEL_PHOTO_STORAGE": "r2",
+                "R2_BUCKET_NAME": "private-meter-photos",
+            },
+        ), patch.object(
+            photo_storage, "_r2_client", return_value=fake_client
+        ):
+            photo_storage.delete_photos(keys)
+
+        self.assertEqual(fake_client.delete_objects.call_count, 2)
+        first_batch = fake_client.delete_objects.call_args_list[0].kwargs
+        second_batch = fake_client.delete_objects.call_args_list[1].kwargs
+        self.assertEqual(len(first_batch["Delete"]["Objects"]), 1000)
+        self.assertEqual(len(second_batch["Delete"]["Objects"]), 1)
+
+    def test_r2_photo_cleanup_fails_when_a_batch_contains_errors(self) -> None:
+        fake_client = Mock()
+        fake_client.delete_objects.return_value = {
+            "ResponseMetadata": {"HTTPStatusCode": 200},
+            "Errors": [{"Key": "meter-photo.jpg", "Code": "AccessDenied"}],
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "FUEL_PHOTO_STORAGE": "r2",
+                "R2_BUCKET_NAME": "private-meter-photos",
+            },
+        ), patch.object(
+            photo_storage, "_r2_client", return_value=fake_client
+        ):
+            with self.assertRaises(PhotoStorageError):
+                photo_storage.delete_photos(["meter-photo.jpg"])
+
 
 if __name__ == "__main__":
     unittest.main()
