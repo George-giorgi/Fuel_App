@@ -81,6 +81,30 @@ def get_meter_tolerance_litres() -> float:
     return tolerance
 
 
+def is_manual_meter_entry_enabled() -> bool:
+    value = os.environ.get("FUEL_MANUAL_METER_ENTRY_ENABLED", "true").strip().lower()
+    if value not in {"true", "false"}:
+        raise RuntimeError(
+            "FUEL_MANUAL_METER_ENTRY_ENABLED must be 'true' or 'false'."
+        )
+    return value == "true"
+
+
+def get_meter_review_threshold_litres() -> int:
+    value = os.environ.get("FUEL_METER_REVIEW_THRESHOLD_LITRES", "100")
+    try:
+        threshold = int(value)
+    except ValueError as error:
+        raise RuntimeError(
+            "FUEL_METER_REVIEW_THRESHOLD_LITRES must be a positive whole number."
+        ) from error
+    if threshold <= 0:
+        raise RuntimeError(
+            "FUEL_METER_REVIEW_THRESHOLD_LITRES must be a positive whole number."
+        )
+    return threshold
+
+
 def get_auth_secret() -> str:
     secret = os.environ.get("FUEL_AUTH_SECRET", "")
     if len(secret) < 32:

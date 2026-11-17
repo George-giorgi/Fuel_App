@@ -67,6 +67,8 @@ def record_global_meter_event(
         )
     except GlobalMeterConcurrentUpdate as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return GlobalMeterEventRead.model_validate(event)
 
 

@@ -111,6 +111,13 @@ def get_admin_fuel_summary(
         )
         .limit(10)
     ).all()
+    recent_records = session.execute(
+        select(FuelRecord, Employee.name)
+        .outerjoin(Employee, FuelRecord.employee_id == Employee.id)
+        .where(*conditions)
+        .order_by(FuelRecord.created_at.desc(), FuelRecord.id.desc())
+        .limit(10)
+    ).all()
     return {
         "available_from": available[0].date() if available[0] is not None else None,
         "available_to": available[1].date() if available[1] is not None else None,
@@ -128,6 +135,38 @@ def get_admin_fuel_summary(
                 "fill_count": int(row[3]),
             }
             for row in top_vehicles
+        ],
+        "recent_records": [
+            {
+                "id": record.id,
+                "employee_name": (
+                    employee_name
+                    or f"{record.first_name} {record.surname}".strip()
+                ),
+                "reg_number": record.reg_number,
+                "created_at": record.created_at,
+                "current_fill_litres": (
+                    record.current_fill_milli_litres / 1000
+                    if record.current_fill_milli_litres is not None
+                    else record.current_fill_litres or record.litres
+                ),
+                "current_fill_milli_litres": (
+                    record.current_fill_milli_litres
+                ),
+                "mileage_miles": record.mileage_miles,
+                "meter_reading_source": record.meter_reading_source or "legacy",
+                "reading_source": record.reading_source,
+                "cumulative_total_integer": record.cumulative_total_integer,
+                "previous_global_total_integer": (
+                    record.previous_global_total_integer
+                ),
+                "top_current_fill_milli_litres": (
+                    record.top_current_fill_milli_litres
+                ),
+                "meter_check_status": record.meter_check_status,
+                "meter_warnings": record.meter_warnings,
+            }
+            for record, employee_name in recent_records
         ],
     }
 

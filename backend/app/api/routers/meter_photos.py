@@ -10,10 +10,12 @@ from fastapi import (
     Response,
     UploadFile,
 )
+from typing import Literal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import get_current_employee
+from backend.app.core.config import is_manual_meter_entry_enabled
 from backend.app.db.session import get_db_session
 from backend.app.models import Employee, MeterPhoto
 from backend.app.repositories.vehicles import get_vehicle_by_id
@@ -73,6 +75,13 @@ def start_vehicle_photo_session(
     )
 
 
+@router.get("/api/meter-photos/policy")
+def meter_photo_policy(
+    _: Annotated[Employee, Depends(get_current_employee)],
+) -> dict[str, bool]:
+    return {"manual_entry_enabled": is_manual_meter_entry_enabled()}
+
+
 @router.post(
     "/api/qr/sessions",
     response_model=MeterPhotoSessionRead,
@@ -103,6 +112,7 @@ def upload_meter_photo(
     response: Response,
     session: Annotated[Session, Depends(get_db_session)],
     employee: Annotated[Employee, Depends(get_current_employee)],
+    reading_mode: Annotated[Literal["ocr", "manual"], Form()] = "ocr",
 ) -> MeterPhotoRead:
     content = photo.file.read(MAX_METER_PHOTO_BYTES + 1)
     if len(content) > MAX_METER_PHOTO_BYTES:
@@ -117,6 +127,7 @@ def upload_meter_photo(
             session_token,
             content,
             photo.content_type,
+            reading_mode=reading_mode,
         )
     except UnsupportedMeterPhotoType as error:
         raise HTTPException(status_code=415, detail=str(error)) from error
@@ -188,6 +199,8 @@ def confirm_meter_readings(
             meter_photo_id,
             request.current_fill_litres,
             request.cumulative_total_litres,
+            request.current_fill_raw_digits,
+            request.cumulative_total_raw_digits,
         )
     except InvalidMeterVerification as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -234,6 +247,14 @@ def _meter_photo_read(
         ocr_warnings=meter_photo.ocr_warnings,
         current_fill_litres=meter_photo.current_fill_litres,
         cumulative_total_litres=meter_photo.cumulative_total_litres,
+        current_fill_milli_litres=meter_photo.current_fill_milli_litres,
+        cumulative_total_integer=meter_photo.cumulative_total_integer,
+        previous_global_total_integer=meter_photo.previous_global_total_integer,
+        current_fill_raw_digits=meter_photo.current_fill_raw_digits,
+        cumulative_total_raw_digits=meter_photo.cumulative_total_raw_digits,
+        reading_source=meter_photo.reading_source,
+        fill_calculation=meter_photo.fill_calculation,
+        reconciliation_status=meter_photo.reconciliation_status,
         verified_at=meter_photo.verified_at,
         verification_method=meter_photo.verification_method,
         ocr_message=meter_photo.ocr_message,

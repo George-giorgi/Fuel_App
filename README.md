@@ -94,8 +94,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   configure `GOOGLE_CLOUD_VISION_API_KEY` as a secret in Render. The Docker
   image also installs Tesseract for local or explicitly selected Tesseract
   deployments. The service starts with `python -m alembic upgrade head` before
-  Uvicorn. Configure every `sync: false` variable in Render's environment
-  settings.
+  Uvicorn. The blueprint disables standalone manual meter entry in production;
+  employees can still correct OCR readings after uploading a photo. Configure
+  every `sync: false` variable in Render's environment settings.
 - **CORS:** set `FUEL_CORS_ORIGINS` on Render to the exact production Pages
   origin (for example `https://diesel-desk.pages.dev`), without a trailing
   slash. Do not use a wildcard or a preview URL for production.
@@ -237,9 +238,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Boss accounts can search all active registered vehicles for a fuel entry. The
   registries start empty; sample identities and vehicles are created only when the
   explicit local demo seed command is run.
-- Fuel-record reads now require authentication. Fuel-record submissions remain
-  available only after verified meter-photo readings and server-side ownership
-  checks. Reads return only the authenticated employee's records.
+- Fuel-record reads now require authentication. Fuel-record submissions require
+  either verified meter-photo readings or confirmed manual readings, along with
+  server-side vehicle ownership checks. Reads return only the authenticated
+  employee's records.
 
 ## Phase 5 status
 
@@ -272,11 +274,16 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Employee IDs are taken from the authenticated session; only Boss accounts may
   submit a vehicle ID, and the backend verifies it against the selected meter
   photo and active vehicle record.
-- A private meter photo is required. The backend applies EXIF orientation,
-  locates and rectifies the green LCD area, crops its two rows separately, and
-  uses OpenCV to classify seven-segment digits. Both Current Fill and
-  Cumulative Total use all recognized digits and ignore decimal points,
-  returning whole-number litre readings. The bottom-row recognizer also checks
+- The filling action offers Automatic OCR and Manual entry. Manual entry is
+  enabled by default and can be controlled with
+  `FUEL_MANUAL_METER_ENTRY_ENABLED=false`. It works without OCR or internet
+  connectivity for local development; a supporting photo is optional. The
+  Render blueprint disables this standalone mode in production. Photo-backed
+  OCR corrections remain available and retain the original photo as evidence.
+- In the photo workflow, a private meter photo is stored. The backend applies
+  EXIF orientation, locates and rectifies the green LCD area, crops its two rows
+  separately, and uses OpenCV to classify seven-segment digits. It preserves
+  the two rows' raw digits separately. The bottom-row recognizer also checks
   locally adaptive grayscale masks for lighting/color variation and requires
   six digits with matching mask results; otherwise it asks for manual review.
   Google Cloud Vision
@@ -284,17 +291,32 @@ imported. The Render start command applies schema-only Alembic upgrades.
   `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses their text/bounds as
   additional evidence, and compares Vision digits with the independent segment
   result. Tesseract remains an optional local OCR provider.
-- Raw digits are stored separately from numeric readings, preserving leading
-  zeros as OCR evidence. An unclear/missing digit, a Vision/segment disagreement,
-  or an uncertain display crop requires manual review. Employees see the
-  original photo, provider/confidence/warnings, recognized digits, and editable
-  readings. They must check both whole-number values against the photo and enter
-  digits only. For example, the reference display's `22.032` and `26.1563`
-  become `22032` and `261563`; this is the configured interpretation, not a
-  decimal-position inference. Confirmation values are parsed as `Decimal`
-  before verification. A lower cumulative total is accepted
-  into the transaction history but marked as a discrepancy for management
-  review; an administrator can record a reset or replacement event separately.
+- Both rows' raw digits are interpreted as integer milli-litres with three
+  fractional decimal places (`22032` = `22.032 L`, `77001` = `77.001 L`,
+  `100000` = `100.000 L`, and TOTAL `261563` = `261.563 L`). The row-specific
+  decimal positions are retained for presentation. Original raw digit strings,
+  including leading zeros, are preserved. Exact integer milli-litres are used
+  for calculations; compatibility float fields are for display only.
+- When the global-total difference is valid and within the fill limit, it is the
+  transaction fill quantity. The top-row reading is stored separately as evidence.
+  A valid first reading with a top-row fill is saved as a transaction and
+  establishes the global baseline. Other suspicious but usable readings wait in
+  the Admin Meter Review queue; neither a fuel record nor a global-total update
+  occurs until an administrator approves them.
+- The employee reviews the original photo and confirms the displayed digits.
+  If the top row is unavailable, the app can calculate the fill from the
+  positive difference between global totals and asks the employee to confirm
+  the calculated amount. Manual and OCR values use the same validation.
+- Clean reconciled readings and valid first-baseline readings are saved directly
+  and appear in Admin Summary on its next refresh (automatic every 15 seconds
+  while open, or via **Refresh summary**). Readings with warnings are held for
+  Admin Meter Review. An administrator must inspect the original photo and add a
+  review note before approval; stale readings cannot be approved after the
+  global total changes.
+  Zero/negative fills, fills over 100 L without a valid top-row value, missing
+  fill amounts, unchanged totals, and duplicate submissions must be corrected
+  by the employee before saving. Decreased totals and other suspicious but
+  usable readings are saved with warnings without changing the shared total.
 - A labeled reference image and dataset instructions are in
   [`tests/datasets/piusi_k600_3`](./tests/datasets/piusi_k600_3). The reference
   fixture labels the display's raw digits as `22032` and `261563`. This single
@@ -343,15 +365,18 @@ imported. The Render start command applies schema-only Alembic upgrades.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
   are also detected automatically.
-- `current_fill_litres` is the transaction quantity. The app compares
-  `cumulative_total_litres` with the previous accepted reading from the shared
-  PIUSI meter, across all employees and vehicles. The app does not add the
-  current fill to the previous total. `FUEL_METER_TOLERANCE_LITRES` configures
-  the accepted difference in litres and defaults to `0.10`.
-- A cumulative decrease blocks submission until management records a global
-  meter reset or replacement and its new baseline. Other
-  cumulative/current-fill mismatches are saved with a visible discrepancy
-  status for review.
+- `FUEL_METER_TOLERANCE_LITRES` configures the reconciliation tolerance and
+  defaults to `0.10 L`. `FUEL_METER_REVIEW_THRESHOLD_LITRES` flags larger
+  cumulative increases and defaults to `100 L`; larger increases wait for
+  administrator review.
+- The additive `0016_piusi_exact_readings_and_reviews` migration adds exact
+  integer/raw-digit columns and the administrator review queue. Migration
+  `0018_global_total_millilitres` uses raw-digit evidence to normalize stored
+  whole-digit readings, backfills exact values when they are precise to a
+  thousandth of a litre, and keeps a rollback copy of changed compatibility
+  values. Ambiguous historic values are preserved rather than guessed; if the
+  active global total cannot be represented exactly, new fuel submissions are
+  blocked until an administrator resolves it.
 - Employees enter the current vehicle odometer in miles (to one decimal place)
   in the transaction form. Readings are stored and sent through the API in
   miles. Existing kilometre readings are converted to the nearest tenth of a
@@ -376,11 +401,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
   chronological non-negative finite cumulative reading. When timestamps are
   tied, the highest reading is used. No local database snapshot or reading is
   required in the repository.
-- Each saved fill updates the global state from the verified photo's
-  cumulative-total reading in the same SQLite transaction as the fuel record.
-  The state retains the previous total and the latest employee, vehicle, time,
-  and transaction/photo references. Duplicate photos cannot update it twice;
-  concurrent updates use a revision check and are rejected for review if stale.
+- Only accepted or Admin-approved fills update the global state, in the same
+  database transaction as the fuel record. Exact integer totals, raw digits,
+  previous accepted total, source, and photo references are retained. Duplicate
+  evidence cannot update twice, and compare-and-swap revision checks prevent
+  simultaneous submissions or stale reviews from changing the total.
 - The Global Cumulative Total card and cross-employee history are available
   only to Admin and Boss accounts. FastAPI returns HTTP 403 to employees on
   global meter state, history, reset/replacement, and photo endpoints.
@@ -438,23 +463,21 @@ imported. The Render start command applies schema-only Alembic upgrades.
 3. Repeat with `Tommy2` through `Tommy10`; registrations run from
    `DD-TOMMY-002` through `DD-TOMMY-010`. Each account sees only its own history
    and assigned vehicle. These shared demo credentials are for local testing.
-4. On an authorized tablet, write the readings on plain white paper in dark
-   block digits, one per line. Labels are not required:
-
-   ```text
-   [current fill in litres]
-   [cumulative total in litres]
-   ```
-
-   Select **Open camera**, allow camera access, take a clear photo, check the
-   preview, and select **Upload photo and run OCR**. Confirm only when both
-   extracted readings match the paper, then enter the current odometer. Browser
-   camera access requires HTTPS (localhost is exempt). If OCR is uncertain,
-   retake the photo; manual readings are not accepted. When using the local
-   provider, install Tesseract if the executable is missing.
+4. Select **Open camera**, allow camera access, and capture the PIUSI display
+   with both rows in focus. Review the raw top-row and TOTAL-row digits against
+   the meter before confirming. For example, `22032` is a 22.032 L fill and
+   `261563` is a 261.563 L cumulative total. Local development may use manual
+   entry without OCR; production requires the photo workflow, and corrections
+   retain the uploaded photo as evidence. If the top row is unavailable, the app
+   shows the calculated difference and requires you to confirm it. Browser
+   camera access requires HTTPS (localhost is exempt).
 5. If an odometer decreases, an administrator must authorize the exact
    corrected odometer from the local registry panel before the employee retries.
-6. Log in as the configured Admin (or a Boss account) to view **Global meter**. It shows
+6. Submit a fuel record and confirm it appears in the Admin **Summary** after
+   refresh or within 15 seconds. If readings are flagged, they remain pending in
+   the Admin **Meter review** tab until approved or rejected with a note. Admins
+   and Boss accounts can view
+   **Global meter**. It shows
    the latest reading, previous reading and difference, update time, employee,
    vehicle, meter photo when available, and shared history. Tommy1 through Tommy10
    do not have access to this management-only view or its API endpoints.
@@ -541,6 +564,19 @@ password. These
 credentials and generated records are for local testing only; do not use them
 outside local development. Fuel history is returned only for the authenticated
 employee, and the session cookie is revoked on logout.
+
+## Clear local history
+
+To clear local fuel, meter, photo, QR-session, correction, and login-session
+history while keeping employee accounts, vehicles, and their assignments, run:
+
+```bash
+python -m backend.app.cli clear-history
+```
+
+The command is restricted to `data/diesel-desk-dev.sqlite` with local photo
+storage. It also clears the stored meter baseline and removes local meter-photo
+files. All users must sign in again afterward.
 
 ## One-time production data reset
 

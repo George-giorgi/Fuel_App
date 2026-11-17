@@ -369,13 +369,13 @@ def _recognize_row(
         )
         confidence = sum(score for _, score in classified) / len(classified)
         decimal_position = (
-            None
+            max(0, len(raw_digits) - 3)
             if whole_number
             else _decimal_position(mask, boxes, x1, y1, row_height)
         )
         value = None
         if whole_number:
-            value = int(raw_digits)
+            value = Decimal(raw_digits).scaleb(-3)
         elif decimal_position is not None and 0 < decimal_position < len(raw_digits):
             try:
                 value = Decimal(

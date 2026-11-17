@@ -2,6 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
+    BigInteger,
     DateTime,
     Float,
     ForeignKey,
@@ -18,7 +19,7 @@ class GlobalMeterEvent(Base):
     __tablename__ = "global_meter_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('reset', 'replacement')",
+            "event_type IN ('baseline', 'reset', 'replacement')",
             name="ck_global_meter_events_event_type",
         ),
         CheckConstraint(
@@ -43,6 +44,18 @@ class GlobalMeterEvent(Base):
         DateTime(timezone=True), nullable=False
     )
     notes: Mapped[str] = mapped_column(String(500), nullable=False)
+    previous_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    baseline_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    previous_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    baseline_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
 
 
 class GlobalMeterState(Base):
@@ -84,3 +97,12 @@ class GlobalMeterState(Base):
         ForeignKey("global_meter_events.id", ondelete="RESTRICT"), nullable=True
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    previous_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    current_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )

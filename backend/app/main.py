@@ -15,6 +15,9 @@ from backend.app.api.routers.global_meter import router as global_meter_router
 from backend.app.api.routers.executive_dashboard import router as executive_dashboard_router
 from backend.app.api.routers.inventory import router as inventory_router
 from backend.app.api.routers.meter_photos import router as meter_photos_router
+from backend.app.api.routers.meter_reading_reviews import (
+    router as meter_reading_reviews_router,
+)
 from backend.app.api.routers.meter_events import router as meter_events_router
 from backend.app.api.routers.vehicles import router as vehicles_router
 from backend.app.core.config import (
@@ -51,6 +54,7 @@ app.include_router(global_meter_router)
 app.include_router(executive_dashboard_router)
 app.include_router(inventory_router)
 app.include_router(meter_photos_router)
+app.include_router(meter_reading_reviews_router)
 app.include_router(meter_events_router)
 app.include_router(vehicles_router)
 

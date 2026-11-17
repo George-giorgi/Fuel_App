@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, JSON, String, text
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, JSON, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base
@@ -83,3 +83,27 @@ class MeterPhoto(Base):
     )
     verification_method: Mapped[str | None] = mapped_column(String(24), nullable=True)
     ocr_message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    current_fill_milli_litres: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    top_current_fill_milli_litres: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    cumulative_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    previous_global_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    current_fill_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    cumulative_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    reading_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    fill_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    fill_calculation: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    reconciliation_status: Mapped[str | None] = mapped_column(
+        String(24), nullable=True
+    )

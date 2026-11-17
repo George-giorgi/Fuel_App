@@ -42,7 +42,7 @@ _GOOGLE_VISION_MIN_CONFIDENCE = 80.0
 class MeterOcrResult:
     status: str
     current_fill_litres: int | None = None
-    cumulative_total_litres: int | None = None
+    cumulative_total_litres: float | None = None
     current_fill_confidence: float | None = None
     cumulative_total_confidence: float | None = None
     message: str | None = None
@@ -101,6 +101,11 @@ def _whole_number_from_digits(digits: str | None) -> int | None:
     if not digits or not digits.isascii() or not digits.isdigit():
         return None
     return int(digits)
+
+
+def _cumulative_total_litres_from_digits(digits: str | None) -> float | None:
+    value = _whole_number_from_digits(digits)
+    return value / 1000 if value is not None else None
 
 
 def _ascii_digits(value: str) -> str | None:
@@ -190,7 +195,7 @@ def parse_meter_ocr_data(
     ) = readings[1]
     current_fill = _whole_number_from_digits(current_raw_digits)
     total_raw_digits = _ascii_digits(total_text)
-    cumulative_total = _whole_number_from_digits(total_raw_digits)
+    cumulative_total = _cumulative_total_litres_from_digits(total_raw_digits)
     if current_fill is None or current_fill <= 0:
         return MeterOcrResult(
             status="uncertain",
@@ -204,7 +209,17 @@ def parse_meter_ocr_data(
                 else "The first-line fill was read as zero; check the PIUSI display."
             ),
             current_fill_raw_digits=current_raw_digits,
+            current_fill_decimal_position=(
+                max(0, len(current_raw_digits) - 3)
+                if current_raw_digits is not None
+                else None
+            ),
             cumulative_total_raw_digits=total_raw_digits,
+            cumulative_total_decimal_position=(
+                max(0, len(total_raw_digits) - 3)
+                if total_raw_digits is not None
+                else None
+            ),
         )
     if cumulative_total is None:
         return MeterOcrResult(
@@ -214,7 +229,17 @@ def parse_meter_ocr_data(
             cumulative_total_confidence=cumulative_confidence,
             message="Could not read all cumulative-total digits. Review the photo.",
             current_fill_raw_digits=current_raw_digits,
+            current_fill_decimal_position=(
+                max(0, len(current_raw_digits) - 3)
+                if current_raw_digits is not None
+                else None
+            ),
             cumulative_total_raw_digits=total_raw_digits,
+            cumulative_total_decimal_position=(
+                max(0, len(total_raw_digits) - 3)
+                if total_raw_digits is not None
+                else None
+            ),
         )
     confidences = (current_confidence, cumulative_confidence)
     if min(confidences) < min_confidence:
@@ -234,7 +259,17 @@ def parse_meter_ocr_data(
         cumulative_total_confidence=cumulative_confidence,
         message=message,
         current_fill_raw_digits=current_raw_digits,
+        current_fill_decimal_position=(
+            max(0, len(current_raw_digits) - 3)
+            if current_raw_digits is not None
+            else None
+        ),
         cumulative_total_raw_digits=total_raw_digits,
+        cumulative_total_decimal_position=(
+            max(0, len(total_raw_digits) - 3)
+            if total_raw_digits is not None
+            else None
+        ),
     )
 
 
@@ -999,7 +1034,7 @@ def _extract_google_vision_readings(
         return MeterOcrResult(
             status="uncertain",
             current_fill_litres=_whole_number_from_digits(current_raw_digits),
-            cumulative_total_litres=_whole_number_from_digits(total_digits),
+            cumulative_total_litres=_cumulative_total_litres_from_digits(total_digits),
             current_fill_confidence=current_confidence,
             cumulative_total_confidence=total_confidence,
             message=(
@@ -1205,10 +1240,15 @@ def _apply_piusi_evidence(
         if current_digits_match
         else result.current_fill_raw_digits
     )
-    total_value = _whole_number_from_digits(
+    total_milli_litres = _whole_number_from_digits(
         total.raw_digits
         if total_digits_match
         else result.cumulative_total_raw_digits
+    )
+    total_value = (
+        total_milli_litres / 1000
+        if total_milli_litres is not None
+        else None
     )
     if not current_digits_match or not total_digits_match:
         if not current_digits_match:
@@ -1238,8 +1278,17 @@ def _apply_piusi_evidence(
         message=message,
         provider=provider,
         current_fill_raw_digits=current.raw_digits,
+        current_fill_decimal_position=(
+            max(0, len(current.raw_digits) - 3)
+            if current.raw_digits is not None
+            else None
+        ),
         cumulative_total_raw_digits=total.raw_digits,
-        cumulative_total_decimal_position=total.decimal_position,
+        cumulative_total_decimal_position=(
+            max(0, len(total.raw_digits) - 3)
+            if total.raw_digits is not None
+            else None
+        ),
         current_fill_segment_confidence=(
             current.confidence * 100 if current.confidence is not None else None
         ),

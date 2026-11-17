@@ -7,10 +7,10 @@
       "current_fill": "22.032",
       "current_fill_raw_digits": "22032",
       "current_fill_decimal_position": 2,
-      "cumulative_total": "26.1563",
+      "cumulative_total": "261.563",
       "cumulative_total_raw_digits": "261563",
-      "cumulative_total_decimal_position": 2,
-      "expected_ocr_status": "manual_review"
+      "cumulative_total_decimal_position": 3,
+      "expected_ocr_status": "ready"
     }
   ]
 }

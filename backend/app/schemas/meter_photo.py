@@ -57,6 +57,16 @@ class MeterPhotoRead(BaseModel):
     ocr_warnings: list[str] | None
     current_fill_litres: float | None
     cumulative_total_litres: float | None
+    current_fill_milli_litres: int | None = None
+    top_current_fill_milli_litres: int | None = None
+    cumulative_total_integer: int | None = None
+    previous_global_total_integer: int | None = None
+    current_fill_raw_digits: str | None = None
+    cumulative_total_raw_digits: str | None = None
+    reading_source: str | None = None
+    fill_source: str | None = None
+    fill_calculation: str | None = None
+    reconciliation_status: str | None = None
     verified_at: datetime | None
     verification_method: str | None
     ocr_message: str | None
@@ -70,17 +80,25 @@ class MeterPhotoVerify(BaseModel):
     )
 
     confirmed: bool
-    current_fill_litres: Decimal | None = Field(default=None, gt=0)
-    cumulative_total_litres: Decimal | None = Field(default=None, ge=0)
+    current_fill_litres: Decimal | None = Field(default=None, ge=0)
+    cumulative_total_litres: Decimal | None = Field(
+        default=None, ge=0, decimal_places=3
+    )
+    current_fill_raw_digits: str | None = Field(default=None, max_length=32)
+    cumulative_total_raw_digits: str | None = Field(default=None, max_length=32)
 
     @model_validator(mode="after")
     def require_confirmation(self) -> "MeterPhotoVerify":
         if not self.confirmed:
-            raise ValueError("Confirm both readings against the meter before saving.")
-        if (self.current_fill_litres is None) != (
-            self.cumulative_total_litres is None
+            raise ValueError("Confirm the entered meter readings before saving.")
+        if (
+            self.current_fill_litres is not None
+            and self.current_fill_raw_digits is not None
+        ) or (
+            self.cumulative_total_litres is not None
+            and self.cumulative_total_raw_digits is not None
         ):
-            raise ValueError("Enter both meter readings or neither.")
+            raise ValueError("Provide raw digits or legacy numeric readings, not both.")
         if (
             self.current_fill_litres is not None
             and not self.current_fill_litres.is_finite()
@@ -89,14 +107,13 @@ class MeterPhotoVerify(BaseModel):
             and not self.cumulative_total_litres.is_finite()
         ):
             raise ValueError("Meter readings must be finite numbers.")
-        if (
-            self.current_fill_litres is not None
-            and self.current_fill_litres.as_tuple().exponent < 0
+        for field_name in (
+            "current_fill_raw_digits",
+            "cumulative_total_raw_digits",
         ):
-            raise ValueError("Current Fill must be entered as whole litres.")
-        if (
-            self.cumulative_total_litres is not None
-            and self.cumulative_total_litres.as_tuple().exponent < 0
-        ):
-            raise ValueError("Cumulative Total must be entered as whole litres.")
+            value = getattr(self, field_name)
+            if value is not None and (
+                not value.isascii() or not value.isdigit()
+            ):
+                raise ValueError(f"{field_name} must contain digits only.")
         return self

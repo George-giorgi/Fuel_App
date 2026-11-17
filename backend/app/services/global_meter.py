@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 import math
 
 from sqlalchemy import select, update
@@ -11,6 +12,10 @@ from backend.app.models import (
     GlobalMeterState,
     MeterPhoto,
     Vehicle,
+)
+from backend.app.services.meter_readings import (
+    decimal_to_milli_litres,
+    milli_litres_to_decimal,
 )
 from backend.app.services.photo_storage import read_photo
 
@@ -52,8 +57,17 @@ def get_or_create_global_meter_state(session: Session) -> GlobalMeterState:
         current_cumulative_total_litres=(
             latest.cumulative_total_litres if latest is not None else None
         ),
+        current_total_integer=(
+            latest.cumulative_total_integer if latest is not None else None
+        ),
+        current_total_raw_digits=(
+            latest.cumulative_total_raw_digits if latest is not None else None
+        ),
         previous_cumulative_total_litres=(
             previous.cumulative_total_litres if previous is not None else None
+        ),
+        previous_total_integer=(
+            previous.cumulative_total_integer if previous is not None else None
         ),
         last_updated_at=latest.created_at if latest is not None else None,
         last_transaction_id=latest.id if latest is not None else None,
@@ -84,6 +98,9 @@ def update_global_meter_after_fill(
         .values(
             previous_cumulative_total_litres=state.current_cumulative_total_litres,
             current_cumulative_total_litres=record.cumulative_total_litres,
+            previous_total_integer=record.previous_global_total_integer,
+            current_total_integer=record.cumulative_total_integer,
+            current_total_raw_digits=record.cumulative_total_raw_digits,
             last_updated_at=updated_at,
             last_transaction_id=record.id,
             last_employee_id=employee.id,
@@ -101,6 +118,9 @@ def update_global_meter_after_fill(
 
     state.previous_cumulative_total_litres = state.current_cumulative_total_litres
     state.current_cumulative_total_litres = record.cumulative_total_litres
+    state.previous_total_integer = record.previous_global_total_integer
+    state.current_total_integer = record.cumulative_total_integer
+    state.current_total_raw_digits = record.cumulative_total_raw_digits
     state.last_updated_at = updated_at
     state.last_transaction_id = record.id
     state.last_employee_id = employee.id
@@ -109,22 +129,66 @@ def update_global_meter_after_fill(
     state.revision = expected_revision + 1
 
 
+def advance_global_meter_revision(
+    session: Session, state: GlobalMeterState
+) -> None:
+    expected_revision = state.revision
+    result = session.execute(
+        update(GlobalMeterState)
+        .where(
+            GlobalMeterState.id == 1,
+            GlobalMeterState.revision == expected_revision,
+        )
+        .values(revision=expected_revision + 1)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise GlobalMeterConcurrentUpdate(
+            "The global meter changed while this fill was being saved. "
+            "Review the latest reading and submit again."
+        )
+    state.revision = expected_revision + 1
+
+
 def create_global_meter_event(
     session: Session,
     employee: Employee,
     event_type: str,
-    baseline_total: float,
+    baseline_total: int | float | Decimal,
     notes: str,
 ) -> GlobalMeterEvent:
+    try:
+        baseline_total_integer = decimal_to_milli_litres(
+            Decimal(str(baseline_total))
+        )
+    except (ValueError, ArithmeticError) as error:
+        raise ValueError(
+            "Global meter event baseline must be non-negative with no more than 3 decimals."
+        ) from error
     state = get_or_create_global_meter_state(session)
+    if event_type == "baseline" and state.current_cumulative_total_litres is not None:
+        raise ValueError("A baseline can only be established before the first reading.")
+    if event_type != "baseline" and state.current_cumulative_total_litres is None:
+        raise ValueError("Establish the initial global meter baseline first.")
     now = datetime.now(timezone.utc)
+    baseline_total_compat = float(
+        milli_litres_to_decimal(baseline_total_integer)
+    )
     event = GlobalMeterEvent(
         event_type=event_type,
         previous_cumulative_total_litres=state.current_cumulative_total_litres,
-        baseline_cumulative_total_litres=baseline_total,
+        baseline_cumulative_total_litres=baseline_total_compat,
         authorized_by_employee_id=employee.id,
         occurred_at=now,
         notes=notes,
+        previous_total_integer=(
+            state.current_total_integer
+            if state.current_total_integer is not None
+            else None
+        ),
+        baseline_total_integer=baseline_total_integer,
+        previous_total_raw_digits=state.current_total_raw_digits,
+        baseline_total_raw_digits=str(baseline_total_integer),
     )
     session.add(event)
     session.flush()
@@ -138,7 +202,14 @@ def create_global_meter_event(
         )
         .values(
             previous_cumulative_total_litres=state.current_cumulative_total_litres,
-            current_cumulative_total_litres=baseline_total,
+            current_cumulative_total_litres=baseline_total_compat,
+            previous_total_integer=(
+                state.current_total_integer
+                if state.current_total_integer is not None
+                else None
+            ),
+            current_total_integer=baseline_total_integer,
+            current_total_raw_digits=str(baseline_total_integer),
             last_updated_at=now,
             last_transaction_id=None,
             last_employee_id=employee.id,
@@ -155,7 +226,14 @@ def create_global_meter_event(
         )
 
     state.previous_cumulative_total_litres = state.current_cumulative_total_litres
-    state.current_cumulative_total_litres = baseline_total
+    state.current_cumulative_total_litres = baseline_total_compat
+    state.previous_total_integer = (
+        state.current_total_integer
+        if state.current_total_integer is not None
+        else None
+    )
+    state.current_total_integer = baseline_total_integer
+    state.current_total_raw_digits = str(baseline_total_integer)
     state.last_updated_at = now
     state.last_transaction_id = None
     state.last_employee_id = employee.id
@@ -192,6 +270,9 @@ def get_global_meter_summary(session: Session) -> dict[str, object]:
         "current_cumulative_total_litres": (
             state.current_cumulative_total_litres
         ),
+        "current_total_integer": state.current_total_integer,
+        "previous_total_integer": state.previous_total_integer,
+        "current_total_raw_digits": state.current_total_raw_digits,
         "previous_cumulative_total_litres": (
             state.previous_cumulative_total_litres
         ),
@@ -200,6 +281,12 @@ def get_global_meter_summary(session: Session) -> dict[str, object]:
             - state.previous_cumulative_total_litres
             if state.current_cumulative_total_litres is not None
             and state.previous_cumulative_total_litres is not None
+            else None
+        ),
+        "difference_integer": (
+            state.current_total_integer - state.previous_total_integer
+            if state.current_total_integer is not None
+            and state.previous_total_integer is not None
             else None
         ),
         "last_updated_at": state.last_updated_at,
@@ -248,7 +335,33 @@ def list_global_meter_history(
                 "previous_cumulative_total_litres": None,
                 "current_fill_litres": record.current_fill_litres,
                 "cumulative_total_litres": record.cumulative_total_litres,
-                "difference_litres": None,
+                "current_fill_milli_litres": record.current_fill_milli_litres,
+                "top_current_fill_milli_litres": (
+                    record.top_current_fill_milli_litres
+                ),
+                "cumulative_total_integer": record.cumulative_total_integer,
+                "previous_total_integer": record.previous_global_total_integer,
+                "reading_source": record.reading_source,
+                "fill_source": record.meter_reading_source,
+                "warnings": record.meter_warnings,
+                "difference_integer": (
+                    record.cumulative_total_integer
+                    - record.previous_global_total_integer
+                    if record.cumulative_total_integer is not None
+                    and record.previous_global_total_integer is not None
+                    else None
+                ),
+                "difference_litres": (
+                    float(
+                        milli_litres_to_decimal(
+                            record.cumulative_total_integer
+                            - record.previous_global_total_integer
+                        )
+                    )
+                    if record.cumulative_total_integer is not None
+                    and record.previous_global_total_integer is not None
+                    else None
+                ),
                 "employee_name": employee_name,
                 "vehicle_registration": registration_number,
                 "meter_photo_id": record.meter_photo_id,
@@ -289,10 +402,28 @@ def list_global_meter_history(
                 "cumulative_total_litres": (
                     event.baseline_cumulative_total_litres
                 ),
+                "current_fill_milli_litres": None,
+                "top_current_fill_milli_litres": None,
+                "cumulative_total_integer": event.baseline_total_integer,
+                "previous_total_integer": event.previous_total_integer,
+                "reading_source": "MANUAL" if event.event_type == "baseline" else None,
+                "fill_source": None,
+                "warnings": None,
+                "difference_integer": (
+                    event.baseline_total_integer - event.previous_total_integer
+                    if event.baseline_total_integer is not None
+                    and event.previous_total_integer is not None
+                    else None
+                ),
                 "difference_litres": (
-                    event.baseline_cumulative_total_litres
-                    - event.previous_cumulative_total_litres
-                    if event.previous_cumulative_total_litres is not None
+                    float(
+                        milli_litres_to_decimal(
+                            event.baseline_total_integer
+                            - event.previous_total_integer
+                        )
+                    )
+                    if event.baseline_total_integer is not None
+                    and event.previous_total_integer is not None
                     else None
                 ),
                 "employee_name": employee_name,

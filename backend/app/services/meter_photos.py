@@ -2,14 +2,14 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import sha256
 from io import BytesIO
-import math
 import secrets
 import warnings
 
 from PIL import Image, UnidentifiedImageError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.core.config import get_meter_tolerance_litres
+from backend.app.core.config import is_manual_meter_entry_enabled
 from backend.app.models import (
     Employee,
     GlobalMeterState,
@@ -31,6 +31,14 @@ from backend.app.repositories.vehicles import (
 )
 from backend.app.services.vehicles import QR_PAYLOAD_PREFIX
 from backend.app.services.meter_ocr import extract_meter_readings
+from backend.app.services.meter_readings import (
+    InvalidMeterDigits,
+    assess_meter_readings,
+    decimal_to_milli_litres,
+    milli_litres_to_decimal,
+    parse_fill_raw_digits,
+    parse_total_raw_digits,
+)
 from backend.app.services.photo_storage import store_photo
 
 
@@ -58,44 +66,6 @@ class InvalidQrSession(ValueError):
 
 class InvalidMeterVerification(ValueError):
     pass
-
-
-def _meter_reading_warnings(
-    session: Session,
-    vehicle: Vehicle,
-    current_fill_litres: float | Decimal | None,
-    cumulative_total_litres: float | Decimal | None,
-) -> list[str]:
-    warnings_found = []
-    if (
-        vehicle.tank_capacity is not None
-        and current_fill_litres is not None
-        and Decimal(str(current_fill_litres))
-        > Decimal(str(vehicle.tank_capacity))
-    ):
-        warnings_found.append(
-            "Current fill exceeds the configured vehicle tank capacity."
-        )
-
-    global_meter = session.get(GlobalMeterState, 1)
-    previous_total = (
-        global_meter.current_cumulative_total_litres
-        if global_meter is not None
-        else None
-    )
-    if previous_total is not None and cumulative_total_litres is not None:
-        delta = Decimal(str(cumulative_total_litres)) - Decimal(str(previous_total))
-        if delta < 0:
-            warnings_found.append(
-                "Cumulative total is below the previous accepted reading; confirm a meter reset or replacement."
-            )
-        elif current_fill_litres is not None and abs(
-            delta - Decimal(str(current_fill_litres))
-        ) > Decimal(str(get_meter_tolerance_litres())):
-            warnings_found.append(
-                "Cumulative increase does not match the current fill; review the readings."
-            )
-    return warnings_found
 
 
 def create_qr_session(
@@ -196,6 +166,8 @@ def store_meter_photo(
     session_token: str,
     content: bytes,
     content_type: str | None,
+    *,
+    reading_mode: str = "ocr",
 ) -> tuple[MeterPhoto, str]:
     token_hash = sha256(session_token.encode("utf-8")).hexdigest()
     qr_session = get_qr_session_by_hash(session, token_hash)
@@ -237,6 +209,17 @@ def store_meter_photo(
         sha256=sha256(content).hexdigest(),
         uploaded_at=now,
     )
+    if reading_mode not in {"ocr", "manual"}:
+        raise InvalidMeterPhoto("Reading mode must be OCR or manual.")
+    if reading_mode == "manual" and not is_manual_meter_entry_enabled():
+        raise InvalidMeterPhoto("Manual meter entry is disabled by configuration.")
+    if reading_mode == "manual":
+        meter_photo.ocr_status = "skipped"
+        meter_photo.ocr_message = "OCR skipped for manual entry."
+        qr_session.consumed_at = now
+        add_meter_photo(session, meter_photo)
+        return meter_photo, vehicle.registration_number
+
     ocr_result = extract_meter_readings(content)
     meter_photo.ocr_status = ocr_result.status
     meter_photo.ocr_current_fill_litres = ocr_result.current_fill_litres
@@ -271,15 +254,17 @@ def store_meter_photo(
     meter_photo.ocr_cumulative_total_segment_confidence = (
         ocr_result.cumulative_total_segment_confidence
     )
-    warnings_found = list(ocr_result.warnings)
-    warnings_found.extend(
-        _meter_reading_warnings(
-            session,
-            vehicle,
-            ocr_result.current_fill_litres,
-            ocr_result.cumulative_total_litres,
+    duplicate_photo = session.scalar(
+        select(MeterPhoto.id).where(
+            MeterPhoto.sha256 == meter_photo.sha256,
+            MeterPhoto.id != meter_photo.id,
         )
     )
+    warnings_found = list(ocr_result.warnings)
+    if duplicate_photo is not None:
+        warnings_found.append(
+            "This photograph matches an earlier upload and requires review."
+        )
     meter_photo.ocr_warnings = list(dict.fromkeys(warnings_found))
     qr_session.consumed_at = now
     add_meter_photo(session, meter_photo)
@@ -293,6 +278,8 @@ def verify_meter_photo(
     meter_photo_id: int,
     current_fill_litres: Decimal | None = None,
     cumulative_total_litres: Decimal | None = None,
+    current_fill_raw_digits: str | None = None,
+    cumulative_total_raw_digits: str | None = None,
 ) -> MeterPhoto | None:
     meter_photo = get_meter_photo_by_id(session, meter_photo_id)
     if meter_photo is None or meter_photo.employee_id != employee.id:
@@ -306,89 +293,150 @@ def verify_meter_photo(
         assigned_vehicle = get_employee_vehicle(session, employee.id)
         if assigned_vehicle is None or assigned_vehicle.id != vehicle.id:
             return None
-    if (current_fill_litres is None) != (cumulative_total_litres is None):
-        raise InvalidMeterVerification(
-            "Enter both meter readings or neither."
-        )
-    if (
-        current_fill_litres is not None
-        and current_fill_litres.as_tuple().exponent < 0
-    ):
-        raise InvalidMeterVerification(
-            "Current Fill must be entered as whole litres."
-        )
-    if (
-        cumulative_total_litres is not None
-        and cumulative_total_litres.as_tuple().exponent < 0
-    ):
-        raise InvalidMeterVerification(
-            "Cumulative Total must be entered as whole litres."
-        )
-    if current_fill_litres is not None and cumulative_total_litres is not None:
+    if current_fill_raw_digits is None and current_fill_litres is not None:
         if (
             not current_fill_litres.is_finite()
-            or not cumulative_total_litres.is_finite()
-            or current_fill_litres <= 0
-            or cumulative_total_litres < 0
-        ):
-            raise InvalidMeterVerification("Enter valid non-negative meter readings.")
-        final_current_fill = float(current_fill_litres)
-        final_cumulative_total = float(cumulative_total_litres)
-        manual_correction = (
-            meter_photo.ocr_status != "ready"
-            or meter_photo.ocr_current_fill_litres is None
-            or meter_photo.ocr_cumulative_total_litres is None
-            or Decimal(str(meter_photo.ocr_current_fill_litres))
-            != current_fill_litres
-            or Decimal(str(meter_photo.ocr_cumulative_total_litres))
-            != cumulative_total_litres
-        )
-    else:
-        if (
-            meter_photo.ocr_status != "ready"
-            or meter_photo.ocr_current_fill_litres is None
-            or meter_photo.ocr_cumulative_total_litres is None
-            or meter_photo.ocr_current_fill_confidence is None
-            or meter_photo.ocr_cumulative_total_confidence is None
-            or meter_photo.ocr_current_fill_confidence < 60
-            or meter_photo.ocr_cumulative_total_confidence < 60
-            or meter_photo.ocr_current_fill_litres <= 0
-            or meter_photo.ocr_cumulative_total_litres < 0
-            or not math.isfinite(meter_photo.ocr_current_fill_litres)
-            or not math.isfinite(meter_photo.ocr_cumulative_total_litres)
-            or not float(meter_photo.ocr_current_fill_litres).is_integer()
-            or not float(meter_photo.ocr_cumulative_total_litres).is_integer()
+            or current_fill_litres < 0
+            or current_fill_litres.as_tuple().exponent < -3
         ):
             raise InvalidMeterVerification(
-                "OCR readings are missing or uncertain. Enter both values after "
-                "checking them against the meter, or retake the photo."
+                "Fill must be non-negative with no more than 3 decimal places."
             )
-        final_current_fill = meter_photo.ocr_current_fill_litres
-        final_cumulative_total = meter_photo.ocr_cumulative_total_litres
-        manual_correction = False
-
-    additional_warnings = _meter_reading_warnings(
-        session,
-        vehicle,
-        current_fill_litres
-        if current_fill_litres is not None
-        else meter_photo.ocr_current_fill_litres,
-        cumulative_total_litres
-        if cumulative_total_litres is not None
-        else meter_photo.ocr_cumulative_total_litres,
-    )
-    if additional_warnings:
-        existing_warnings = list(meter_photo.ocr_warnings or [])
-        meter_photo.ocr_warnings = list(
-            dict.fromkeys(existing_warnings + additional_warnings)
+        current_fill_raw_digits = str(int(current_fill_litres * 1000))
+    if cumulative_total_raw_digits is None and cumulative_total_litres is not None:
+        if (
+            not cumulative_total_litres.is_finite()
+            or cumulative_total_litres < 0
+            or cumulative_total_litres.as_tuple().exponent < -3
+        ):
+            raise InvalidMeterVerification(
+                "Global cumulative total must be non-negative with no more than 3 decimals."
+            )
+        cumulative_total_raw_digits = str(
+            decimal_to_milli_litres(cumulative_total_litres)
         )
+    if current_fill_raw_digits is None and meter_photo.ocr_status == "ready":
+        if (meter_photo.ocr_current_fill_confidence or 0) >= 60:
+            current_fill_raw_digits = meter_photo.ocr_current_fill_raw_digits
+    if cumulative_total_raw_digits is None and meter_photo.ocr_status == "ready":
+        if (meter_photo.ocr_cumulative_total_confidence or 0) >= 60:
+            cumulative_total_raw_digits = (
+                meter_photo.ocr_cumulative_total_raw_digits
+            )
+    try:
+        fill_milli_litres = parse_fill_raw_digits(current_fill_raw_digits)
+        cumulative_total = parse_total_raw_digits(cumulative_total_raw_digits)
+    except InvalidMeterDigits as error:
+        raise InvalidMeterVerification(str(error)) from error
+    if cumulative_total is None:
+        raise InvalidMeterVerification(
+            "The global cumulative total is missing. Check the TOTAL row and enter its digits."
+        )
+    global_meter = session.get(GlobalMeterState, 1)
+    previous_total = (
+        global_meter.current_total_integer
+        if global_meter is not None
+        else None
+    )
+    ocr_values_match = (
+        meter_photo.ocr_status == "ready"
+        and current_fill_raw_digits
+        == meter_photo.ocr_current_fill_raw_digits
+        and cumulative_total_raw_digits
+        == meter_photo.ocr_cumulative_total_raw_digits
+    )
+    if not ocr_values_match:
+        source = "MANUAL"
+    elif meter_photo.ocr_provider == "google_vision":
+        source = "GOOGLE_VISION"
+    elif meter_photo.ocr_provider == "tesseract":
+        source = "OPENCV"
+    else:
+        raise InvalidMeterVerification(
+            "The OCR provider is unsupported for verified reading sources."
+        )
+    if meter_photo.ocr_status == "skipped" and not is_manual_meter_entry_enabled():
+        raise InvalidMeterVerification(
+            "Manual meter entry is disabled by configuration."
+        )
+    assessment = assess_meter_readings(
+        fill_milli_litres=fill_milli_litres,
+        previous_total_milli_litres=previous_total,
+        cumulative_total_milli_litres=cumulative_total,
+        source=source,
+        tank_capacity_litres=vehicle.tank_capacity,
+    )
+    evidence_warnings = list(meter_photo.ocr_warnings or [])
+    for label, numeric_value, raw_digits in (
+        (
+            "current-fill",
+            meter_photo.ocr_current_fill_litres,
+            meter_photo.ocr_current_fill_raw_digits,
+        ),
+        (
+            "global-total",
+            meter_photo.ocr_cumulative_total_litres,
+            meter_photo.ocr_cumulative_total_raw_digits,
+        ),
+    ):
+        if numeric_value is None and raw_digits is None:
+            continue
+        if raw_digits is None:
+            evidence_warnings.append(
+                f"OCR {label} has no raw-digit evidence and requires review."
+            )
+        elif not raw_digits.isascii() or not raw_digits.isdigit():
+            evidence_warnings.append(
+                f"OCR {label} contains invalid raw digits and requires review."
+            )
+        elif (
+            numeric_value is None
+            or Decimal(str(numeric_value))
+            != (
+                Decimal(int(raw_digits))
+                if label == "current-fill"
+                else Decimal(int(raw_digits)).scaleb(-3)
+            )
+        ):
+            evidence_warnings.append(
+                f"OCR {label} numeric result disagrees with its raw digits."
+            )
+    current_fill_litres = milli_litres_to_decimal(
+        assessment.fill_milli_litres
+    )
+    final_current_fill = (
+        float(current_fill_litres)
+        if current_fill_litres is not None
+        else None
+    )
+    final_cumulative_total = (
+        float(milli_litres_to_decimal(cumulative_total))
+        if cumulative_total is not None
+        else None
+    )
 
     now = datetime.now(timezone.utc)
+    meter_photo.current_fill_milli_litres = assessment.fill_milli_litres
+    meter_photo.top_current_fill_milli_litres = (
+        assessment.top_current_fill_milli_litres
+    )
+    meter_photo.cumulative_total_integer = cumulative_total
+    meter_photo.previous_global_total_integer = previous_total
+    meter_photo.current_fill_raw_digits = current_fill_raw_digits
+    meter_photo.cumulative_total_raw_digits = cumulative_total_raw_digits
+    meter_photo.reading_source = assessment.source
+    meter_photo.fill_source = assessment.fill_source
+    meter_photo.fill_calculation = assessment.fill_calculation
+    meter_photo.reconciliation_status = assessment.reconciliation_status
+    meter_photo.ocr_warnings = list(
+        dict.fromkeys(
+            evidence_warnings
+            + list(assessment.warnings)
+        )
+    )
     meter_photo.current_fill_litres = final_current_fill
     meter_photo.cumulative_total_litres = final_cumulative_total
     meter_photo.verified_at = now
     meter_photo.verified_by_employee_id = employee.id
-    meter_photo.verification_method = (
-        "manual_correction" if manual_correction else "ocr_confirmed"
-    )
+    meter_photo.verification_method = assessment.source
     return meter_photo

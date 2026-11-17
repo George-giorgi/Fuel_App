@@ -8,16 +8,18 @@ from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from backend.app.core.config import METER_PHOTO_DIRECTORY
+from backend.app.core.config import DATABASE_PATH, METER_PHOTO_DIRECTORY
 from backend.app.db.base import Base
 from backend.app.db.session import SessionLocal, engine
 from backend.app.models import Employee, MeterPhoto
 from backend.app.services.auth import bootstrap_admin
 from backend.app.services.application_reset import reset_application_data
 from backend.app.services.demo_data import reset_demo_data, seed_demo_data
+from backend.app.services.history_cleanup import clear_history
 from backend.app.services.photo_storage import (
     PhotoStorageError,
     delete_photo,
+    get_photo_storage_backend,
     validate_photo_storage_configuration,
 )
 
@@ -122,6 +124,71 @@ def reset_local_demo_data() -> int:
     if failed_cleanup:
         print(
             "Some old private meter-photo files could not be removed.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def clear_local_history() -> int:
+    if engine.dialect.name != "sqlite":
+        print("History cleanup is restricted to local SQLite.", file=sys.stderr)
+        return 2
+    configured_database = engine.url.database
+    if (
+        configured_database is None
+        or Path(configured_database).resolve() != DATABASE_PATH.resolve()
+    ):
+        print(
+            "History cleanup is restricted to data/diesel-desk-dev.sqlite.",
+            file=sys.stderr,
+        )
+        return 2
+    if os.environ.get("FUEL_ENV", "").strip().lower() == "production":
+        print("History cleanup is disabled in production.", file=sys.stderr)
+        return 2
+    try:
+        storage_backend = get_photo_storage_backend()
+    except PhotoStorageError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    if storage_backend != "local":
+        print(
+            "History cleanup is restricted to local photo storage; remote "
+            "photos were not changed.",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        with SessionLocal.begin() as session:
+            photo_storage_keys = clear_history(session)
+    except SQLAlchemyError as error:
+        print(f"Could not clear local history: {error}", file=sys.stderr)
+        return 1
+
+    failed_cleanup = False
+    photo_keys = set(photo_storage_keys)
+    if METER_PHOTO_DIRECTORY.exists():
+        photo_keys.update(
+            path.name
+            for path in METER_PHOTO_DIRECTORY.iterdir()
+            if path.is_file() or path.is_symlink()
+        )
+    for storage_key in sorted(photo_keys):
+        try:
+            delete_photo(storage_key)
+        except PhotoStorageError as error:
+            print(f"Could not remove local meter photo {storage_key!r}: {error}", file=sys.stderr)
+            failed_cleanup = True
+
+    print(
+        "Cleared fuel, meter, photo, QR-session, correction, and login-session "
+        "history. Employee accounts, vehicles, and their assignments were kept."
+    )
+    if failed_cleanup:
+        print(
+            "Some local meter-photo files could not be removed.",
             file=sys.stderr,
         )
         return 1
@@ -242,6 +309,7 @@ def main() -> int:
             "bootstrap-admin",
             "seed-demo-data",
             "reset-demo-data",
+            "clear-history",
             "reset-production-data",
         ],
     )
@@ -252,6 +320,8 @@ def main() -> int:
         return seed_local_demo_data()
     if args.command == "reset-demo-data":
         return reset_local_demo_data()
+    if args.command == "clear-history":
+        return clear_local_history()
     if args.command == "reset-production-data":
         return reset_production_data()
     return 2

@@ -8,6 +8,8 @@ import {
   createVehicle,
   createFuelRecord,
   createGlobalMeterEvent,
+  decideAdminMeterReadingReview,
+  getAdminMeterReadingReviews,
   getAdminEmployeeFuelRecords,
   getAdminEmployees,
   getAdminFuelSummary,
@@ -17,6 +19,7 @@ import {
   getFuelRecords,
   getGlobalMeterHistory,
   getGlobalMeterSummary,
+  getMeterPhotoPolicy,
   getNctAlerts,
   getVehicleFuelRecords,
   getVehicleNctList,
@@ -24,6 +27,7 @@ import {
   identifyVehicle,
   login,
   logout,
+  previewFuelReading,
   provisionVehicleQr,
   startMeterPhotoSession,
   uploadMeterPhoto,
@@ -38,7 +42,7 @@ import {
 
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 const SUBMISSION_NOTICE =
-  'Confirm both OCR values against the PIUSI display before saving. Cumulative discrepancies remain visible for review.';
+  'Top-row digits are stored as exact 0.001 L increments. Readings and warnings are saved with your fuel record; the global total advances only for a valid baseline or reconciled reading.';
 
 function Brand() {
   return (
@@ -371,8 +375,9 @@ function SessionRestoreScreen() {
   );
 }
 
-function MeterPhotoFlow({ onVerified, vehicleId }) {
+function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
   const videoRef = useRef(null);
+  const [entryMode, setEntryMode] = useState('photo');
   const [photo, setPhoto] = useState(null);
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
@@ -385,6 +390,26 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
   const [error, setError] = useState('');
   const [currentFillDraft, setCurrentFillDraft] = useState('');
   const [cumulativeTotalDraft, setCumulativeTotalDraft] = useState('');
+  const [manualCurrentFillDraft, setManualCurrentFillDraft] = useState('');
+  const [manualCumulativeTotalDraft, setManualCumulativeTotalDraft] = useState('');
+  const [manualEvidenceFile, setManualEvidenceFile] = useState(null);
+  const [manualConfirmed, setManualConfirmed] = useState(false);
+  const [manualEntryEnabled, setManualEntryEnabled] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    getMeterPhotoPolicy().then((policy) => {
+      if (active) setManualEntryEnabled(policy.manual_entry_enabled);
+    }).catch((policyError) => {
+      if (active) {
+        setManualEntryEnabled(false);
+        setError(`Could not load manual-entry policy: ${policyError.message}`);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!previewUrl) return undefined;
@@ -522,10 +547,67 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     try {
       const verifiedPhoto = await verifyMeterPhoto(photo.id, {
         confirmed: true,
-        currentFillLitres: currentFillDraft.trim(),
-        cumulativeTotalLitres: cumulativeTotalDraft.trim()
+        currentFillRawDigits: currentFillDraft.trim() || undefined,
+        cumulativeTotalRawDigits: cumulativeTotalDraft.trim() || undefined
       });
       setPhoto(verifiedPhoto);
+      onVerified(verifiedPhoto);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  function enterManualMode() {
+    setCameraStream(null);
+    setPhoto(null);
+    setPendingPhoto(null);
+    setPreviewUrl(null);
+    setManualCurrentFillDraft('');
+    setManualCumulativeTotalDraft('');
+    setManualEvidenceFile(null);
+    setManualConfirmed(false);
+    setEntryMode('manual');
+    setError('');
+    onVerified(null);
+    onManualReadings(null);
+  }
+
+  function enterPhotoMode() {
+    setEntryMode('photo');
+    setManualConfirmed(false);
+    onManualReadings(null);
+  }
+
+  async function handleManualConfirm(event) {
+    event.preventDefault();
+    if (!manualConfirmed) return;
+    const readings = {
+      currentFillRawDigits: manualCurrentFillDraft.trim() || undefined,
+      cumulativeTotalRawDigits: manualCumulativeTotalDraft.trim()
+    };
+    if (!manualEvidenceFile) {
+      onManualReadings(readings);
+      return;
+    }
+    setVerifying(true);
+    setError('');
+    try {
+      const uploadSession = await startMeterPhotoSession(vehicleId);
+      const uploadedPhoto = await uploadMeterPhoto(
+        uploadSession.sessionToken,
+        manualEvidenceFile,
+        'manual'
+      );
+      const verifiedPhoto = await verifyMeterPhoto(uploadedPhoto.id, {
+        confirmed: true,
+        ...readings
+      });
+      setPhoto(verifiedPhoto);
+      setPreviewUrl(URL.createObjectURL(manualEvidenceFile));
+      setEntryMode('photo');
+      onManualReadings(null);
       onVerified(verifiedPhoto);
     } catch (requestError) {
       setError(requestError.message);
@@ -542,6 +624,8 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     setCurrentFillDraft('');
     setCumulativeTotalDraft('');
     setError('');
+    setEntryMode('photo');
+    onManualReadings(null);
     onVerified(null);
     void openCamera();
   }
@@ -554,23 +638,118 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           <p className="eyebrow">METER VERIFICATION</p>
           <h4 className="meter-photo-title">
             <AppIcon name="meter" size={17} />
-            <span>Capture PIUSI meter display</span>
+            <span>
+              {entryMode === 'manual'
+                ? 'Enter PIUSI meter readings'
+                : 'Capture PIUSI meter display'}
+            </span>
           </h4>
           <p className="meter-photo-copy">
-            Keep the display centered and close so both readings are visible. The
-            large top row is the current fill; the smaller row marked TOTAL is the
-            cumulative total. Keep the digits in focus and avoid glare.
+            {entryMode === 'manual'
+              ? 'The top row is the resettable fill; the smaller row marked TOTAL is the non-resettable cumulative total.'
+              : 'Keep the display centered and close so both readings are visible. The top row is the resettable fill; the smaller row marked TOTAL is the non-resettable cumulative total. Keep the digits in focus and avoid glare.'}
           </p>
           <div
             className="reading-sheet-template"
             aria-label="PIUSI display reading order"
           >
-            <p><strong>Large top row:</strong> current fill in litres</p>
-            <p><strong>Smaller TOTAL row:</strong> cumulative total in litres</p>
+            <p><strong>Large top row:</strong> raw fill digits ÷ 1,000 = litres</p>
+            <p><strong>Smaller TOTAL row:</strong> whole-litre cumulative digits</p>
           </div>
         </div>
       </div>
-      {!photo && !pendingPhoto && !cameraStream && (
+      {manualEntryEnabled && entryMode === 'photo' && !photo && !pendingPhoto && (
+        <button
+          className="outline-button manual-entry-button"
+          type="button"
+          onClick={enterManualMode}
+        >
+          Enter readings manually without a photo
+        </button>
+      )}
+      {entryMode === 'manual' && (
+        <form className="meter-review-form" onSubmit={handleManualConfirm}>
+          <p>
+            Enter the displayed digits exactly. The top row is stored in
+            thousandths of a litre and the TOTAL row as a whole number. Manual
+            entry does not use OCR or require internet access.
+          </p>
+          <label>
+            Fill raw digits (top row)
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              pattern="[0-9]+"
+              value={manualCurrentFillDraft}
+              onChange={(event) => {
+                setManualCurrentFillDraft(event.target.value);
+                setManualConfirmed(false);
+                onManualReadings(null);
+              }}
+              placeholder="e.g. 22032 = 22.032 L"
+            />
+          </label>
+          <label>
+            Global cumulative raw digits (TOTAL row)
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              pattern="[0-9]+"
+              required
+              value={manualCumulativeTotalDraft}
+              onChange={(event) => {
+                setManualCumulativeTotalDraft(event.target.value);
+                setManualConfirmed(false);
+                onManualReadings(null);
+              }}
+              placeholder="e.g. 261563 = 261563 L"
+            />
+          </label>
+          <label>
+            Optional supporting photo
+            <input
+              type="file"
+              accept="image/jpeg,image/png"
+              capture="environment"
+              onChange={(event) => {
+                setManualEvidenceFile(event.target.files?.[0] ?? null);
+                setManualConfirmed(false);
+                onManualReadings(null);
+              }}
+            />
+          </label>
+          <label className="meter-confirmation">
+            <input
+              type="checkbox"
+              required
+              checked={manualConfirmed}
+              onChange={(event) => {
+                setManualConfirmed(event.target.checked);
+                if (!event.target.checked) onManualReadings(null);
+              }}
+            />
+            I checked the available digits against the meter. If the top row is
+            missing, the app may calculate the fill from the global total.
+          </label>
+          <button className="primary-button" type="submit" disabled={verifying}>
+            <AppIcon name="check" size={16} />
+            {verifying ? 'Saving manual evidence...' : 'Confirm manual readings'}
+          </button>
+          <button
+            className="outline-button"
+            type="button"
+            onClick={enterPhotoMode}
+          >
+            Use photo and OCR instead
+          </button>
+          {manualConfirmed && (
+            <p role="status">Manual readings confirmed. Enter the odometer below.</p>
+          )}
+        </form>
+      )}
+      {entryMode === 'photo' && !photo && !pendingPhoto && !cameraStream && (
         <button
           className={`camera-start-button${openingCamera ? ' is-opening' : ''}`}
           type="button"
@@ -591,7 +770,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           <span className="camera-start-arrow" aria-hidden="true">-&gt;</span>
         </button>
       )}
-      {cameraStream && (
+      {entryMode === 'photo' && cameraStream && (
         <div className="meter-camera">
           <video
             ref={videoRef}
@@ -624,7 +803,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           </div>
         </div>
       )}
-      {pendingPhoto && !photo && (
+      {entryMode === 'photo' && pendingPhoto && !photo && (
         <div className="meter-capture-review">
           {previewUrl && (
             <img
@@ -658,8 +837,10 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           {uploading && <p role="status">{uploadStatus}</p>}
         </div>
       )}
-      {error && <p className="auth-error" role="alert">{error}</p>}
-      {photo && (
+      {error && (
+        <p className="auth-error" role="alert">{error}</p>
+      )}
+      {entryMode === 'photo' && photo && (
         <div className="meter-review">
           {previewUrl && (
             <img
@@ -722,16 +903,50 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
               <div>
                 <span className="meter-reading-label">
                   <AppIcon name="fuel" size={14} />
-                  <span>Verified Current Fill</span>
+                  <span>Calculated Fill (global difference)</span>
                 </span>
-                <strong>{formatCurrentFill(photo.currentFillLitres)} litres</strong>
+                <strong>
+                  {photo.currentFillMilliLitres == null
+                    ? formatCurrentFill(photo.currentFillLitres)
+                    : formatMilliLitres(photo.currentFillMilliLitres)}
+                  {photo.currentFillLitres == null ? '' : ' litres'}
+                </strong>
+                <small>
+                  Fill source: {photo.fillSource || 'GLOBAL_DIFFERENCE'}
+                </small>
+                <small>
+                  Top-row evidence:{' '}
+                  {photo.topCurrentFillMilliLitres == null
+                    ? 'missing'
+                    : `${(photo.topCurrentFillMilliLitres / 1000).toFixed(3)} L`}
+                  {photo.topCurrentFillMilliLitres == null ||
+                  photo.currentFillMilliLitres == null
+                    ? ''
+                    : ` · difference ${((photo.topCurrentFillMilliLitres - photo.currentFillMilliLitres) / 1000).toFixed(3)} L`}
+                </small>
               </div>
               <div>
                 <span className="meter-reading-label">
                   <AppIcon name="meter" size={14} />
                   <span>Verified Cumulative Total</span>
                 </span>
-                <strong>{formatCumulativeTotal(photo.cumulativeTotalLitres)} litres</strong>
+                <strong>
+                  {formatCumulativeTotal(photo.cumulativeTotalLitres)}
+                  {photo.cumulativeTotalLitres == null ? '' : ' litres'}
+                </strong>
+                <small>
+                  Previous global total:{' '}
+                  {photo.previousGlobalTotalInteger == null
+                    ? 'not established'
+                    : `${formatMilliLitres(photo.previousGlobalTotalInteger)} L`}
+                  {' · Status: '}
+                  {photo.reconciliationStatus === 'review_required'
+                    ? 'warning'
+                    : photo.reconciliationStatus || 'warning'}
+                </small>
+                <small>
+                  Reading source: {photo.readingSource || 'unknown'}
+                </small>
               </div>
               <button
                 className="outline-button"
@@ -744,39 +959,38 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           ) : (
             <form className="meter-review-form" onSubmit={handleVerify}>
               <p>
-                Check both whole-litre values against the original photo. Digits
-                only; decimal points are ignored. Review and correct any
-                uncertain reading.
+                Review the original photo. Enter the top-row raw digits and
+                bottom-row whole-number digits exactly. Leave the top row blank
+                only when it is unavailable and should be calculated from the
+                global difference.
               </p>
               <label>
-                Current Fill (L)
+                Fill raw digits (top row)
                 <input
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
                   pattern="[0-9]+"
-                  required
                   value={currentFillDraft}
                   onChange={(event) => setCurrentFillDraft(event.target.value)}
-                  placeholder="e.g. 22032"
+                  placeholder="e.g. 22032 = 22.032 L"
                 />
               </label>
               <label>
-                Cumulative Total (L)
+                Global cumulative raw digits (TOTAL row)
                 <input
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
                   pattern="[0-9]+"
-                  required
                   value={cumulativeTotalDraft}
                   onChange={(event) => setCumulativeTotalDraft(event.target.value)}
-                  placeholder="e.g. 261563"
+                  placeholder="e.g. 261563 = 261563 L"
                 />
               </label>
               <label className="meter-confirmation">
                 <input type="checkbox" required />
-                I checked both readings against the meter photo.
+                I checked the available digits against the meter photo.
               </label>
               <button
                 className="primary-button"
@@ -819,12 +1033,30 @@ function FuelForm({
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [meterPhoto, setMeterPhoto] = useState(null);
+  const [manualReadings, setManualReadings] = useState(null);
+  const [manualPreview, setManualPreview] = useState(null);
+  const [manualPreviewError, setManualPreviewError] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [calculatedFillConfirmed, setCalculatedFillConfirmed] = useState(false);
   const [odometer, setOdometer] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [flowKey, setFlowKey] = useState(0);
+  const transactionFormRef = useRef(null);
+  const submissionInProgressRef = useRef(false);
   const activeVehicle = allowVehicleSelection ? selectedVehicle : vehicle;
-  const readingsVerified = Boolean(meterPhoto?.verifiedAt);
+  const readingsVerified = Boolean(meterPhoto?.verifiedAt || manualReadings);
+  const isManualEntry = Boolean(
+    manualReadings ||
+      (meterPhoto?.verifiedAt && meterPhoto.readingSource === 'manual')
+  );
+  const currentFillReading =
+    meterPhoto?.currentFillLitres ??
+    (manualPreview?.fillMilliLitres == null
+      ? manualReadings?.currentFillLitres
+      : manualPreview.fillMilliLitres / 1000);
+  const cumulativeTotalReading =
+    meterPhoto?.cumulativeTotalLitres ?? manualReadings?.cumulativeTotalLitres;
   const activeVehicleDetails = activeVehicle
     ? [activeVehicle.make, activeVehicle.model].filter(Boolean).join(' ')
     : '';
@@ -832,13 +1064,45 @@ function FuelForm({
     activeVehicle?.lastRecordedOdometerMiles != null &&
     odometer !== '' &&
     Number(odometer) < activeVehicle.lastRecordedOdometerMiles;
-
+  const calculatedFillNeedsConfirmation =
+    (manualPreview?.fillCalculation === 'global_total_difference' ||
+      meterPhoto?.fillCalculation === 'global_total_difference') &&
+    manualPreview?.topCurrentFillMilliLitres == null &&
+    meterPhoto?.topCurrentFillMilliLitres == null &&
+    !calculatedFillConfirmed;
   useEffect(() => {
     setSelectedVehicle(vehicle);
     setRegistrationSearch(
       allowVehicleSelection ? '' : vehicle?.registrationNumber ?? ''
     );
   }, [allowVehicleSelection, vehicle]);
+
+  useEffect(() => {
+    setManualPreview(null);
+    setManualPreviewError('');
+    setCalculatedFillConfirmed(false);
+    if (
+      meterPhoto?.verifiedAt ||
+      !manualReadings ||
+      manualReadings.currentFillRawDigits
+    ) {
+      return undefined;
+    }
+    let active = true;
+    setPreviewLoading(true);
+    previewFuelReading({
+      cumulativeTotalRawDigits: manualReadings.cumulativeTotalRawDigits
+    }).then((preview) => {
+      if (active) setManualPreview(preview);
+    }).catch((error) => {
+      if (active) setManualPreviewError(error.message);
+    }).finally(() => {
+      if (active) setPreviewLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [manualReadings, meterPhoto]);
 
   useEffect(() => {
     if (!allowVehicleSelection || !suggestionsOpen) return undefined;
@@ -879,6 +1143,7 @@ function FuelForm({
       setRegistrationSearch(foundVehicle.registrationNumber);
       setSuggestionsOpen(false);
       setMeterPhoto(null);
+      setManualReadings(null);
       setOdometer('');
       setSubmitError('');
       setFlowKey((value) => value + 1);
@@ -899,31 +1164,62 @@ function FuelForm({
     if (registrationSearch.trim()) await selectVehicle(registrationSearch);
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    if (!meterPhoto?.verifiedAt) return;
-    const form = event.currentTarget;
-    const data = new FormData(form);
+  function handleVerifiedPhoto(photo) {
+    setMeterPhoto(photo);
+  }
+
+  function handleManualReadings(readings) {
+    setManualReadings(readings);
+  }
+
+  async function saveFuelRecord(odometerMiles) {
+    if (
+      !readingsVerified ||
+      !activeVehicle ||
+      submissionInProgressRef.current
+    ) {
+      return;
+    }
+    submissionInProgressRef.current = true;
     setSubmitting(true);
     setSubmitError('');
     try {
       const record = await createFuelRecord({
-        meterPhotoId: meterPhoto.id,
-        odometerMiles: Number(data.get('odometerMiles')),
+        ...(meterPhoto?.verifiedAt
+          ? {
+              meterPhotoId: meterPhoto.id,
+              calculatedFillConfirmed
+            }
+          : { ...manualReadings, confirmed: true }),
+        ...(manualPreview?.fillCalculation === 'global_total_difference'
+          ? { calculatedFillConfirmed }
+          : {}),
+        odometerMiles,
         ...(allowVehicleSelection
           ? { vehicleId: activeVehicle.id }
           : {})
       });
-      form.reset();
+      transactionFormRef.current?.reset();
       setMeterPhoto(null);
+      setManualReadings(null);
+      setManualPreview(null);
+      setCalculatedFillConfirmed(false);
       setOdometer('');
       setFlowKey((value) => value + 1);
       onRecordCreated(record);
     } catch (error) {
       setSubmitError(error.message);
     } finally {
+      submissionInProgressRef.current = false;
       setSubmitting(false);
     }
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    await saveFuelRecord(Number(data.get('odometerMiles')));
   }
 
   return (
@@ -993,6 +1289,7 @@ function FuelForm({
                   ) {
                     setSelectedVehicle(null);
                     setMeterPhoto(null);
+                    setManualReadings(null);
                     setOdometer('');
                     setSubmitError('');
                     setFlowKey((value) => value + 1);
@@ -1056,7 +1353,8 @@ function FuelForm({
         <MeterPhotoFlow
           key={flowKey}
           vehicleId={allowVehicleSelection ? activeVehicle.id : null}
-          onVerified={setMeterPhoto}
+          onVerified={handleVerifiedPhoto}
+          onManualReadings={handleManualReadings}
         />
       ) : (
         <div className="notice" role="note">
@@ -1068,7 +1366,11 @@ function FuelForm({
           </p>
         </div>
       )}
-      <form className="transaction-form" onSubmit={handleSubmit}>
+      <form
+        className="transaction-form"
+        onSubmit={handleSubmit}
+        ref={transactionFormRef}
+      >
         <fieldset
           className={`transaction-entry${readingsVerified ? ' transaction-entry--ready' : ''}`}
           disabled={!activeVehicle || !readingsVerified || submitting}
@@ -1113,7 +1415,17 @@ function FuelForm({
                 step="0.1"
                 placeholder="e.g. 79850.0"
                 value={odometer}
-                onChange={(event) => setOdometer(event.target.value)}
+                onChange={(event) => {
+                  setOdometer(event.target.value);
+                }}
+                onBlur={(event) => {
+                  const isValid = event.currentTarget.checkValidity();
+                  if (isValid && isManualEntry) {
+                    setSubmitError('');
+                  } else if (event.currentTarget.value && !isValid) {
+                    event.currentTarget.reportValidity();
+                  }
+                }}
                 aria-invalid={Boolean(odometerBelowPrevious)}
                 aria-describedby={
                   activeVehicle?.lastRecordedOdometerMiles != null
@@ -1141,7 +1453,7 @@ function FuelForm({
           <p className="odometer-warning" role="alert">
             This is below the previous recorded mileage of{' '}
             {formatMileage(activeVehicle.lastRecordedOdometerMiles)} mi. An administrator
-            must authorize this corrected value.
+            must authorize this corrected value before it can be saved.
           </p>
         )}
         {readingsVerified && (
@@ -1151,15 +1463,101 @@ function FuelForm({
                 <AppIcon name="fuel" size={14} />
                 <span>Current Fill</span>
               </span>
-              <strong>{formatCurrentFill(meterPhoto.currentFillLitres)} litres</strong>
+              <strong>
+                {currentFillReading == null
+                  ? manualReadings?.currentFillRawDigits
+                    ? `${manualReadings.currentFillRawDigits} raw digits`
+                    : 'Calculated after comparison'
+                  : meterPhoto?.currentFillMilliLitres != null
+                    ? `${formatMilliLitres(meterPhoto.currentFillMilliLitres)} litres`
+                    : manualPreview?.fillMilliLitres != null
+                      ? `${formatMilliLitres(manualPreview.fillMilliLitres)} litres`
+                      : `${formatCurrentFill(currentFillReading)} litres`}
+              </strong>
             </div>
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
                 <span>Cumulative Total</span>
               </span>
-              <strong>{formatCumulativeTotal(meterPhoto.cumulativeTotalLitres)} litres</strong>
+              <strong>
+                {cumulativeTotalReading == null
+                  ? manualReadings?.cumulativeTotalRawDigits || 'Not recorded'
+                  : `${formatCumulativeTotal(cumulativeTotalReading)} litres`}
+              </strong>
             </div>
+          </div>
+        )}
+        {manualPreviewError && (
+          <p className="auth-error" role="alert">{manualPreviewError}</p>
+        )}
+        {previewLoading && <p role="status">Calculating from the global total...</p>}
+        {manualPreview?.warnings?.length > 0 && (
+          <ul className="meter-ocr-warnings" aria-label="Reading preview warnings">
+            {manualPreview.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        )}
+        {manualPreview?.fillCalculation === 'global_total_difference' && (
+          <div className="notice" role="note">
+            <p>
+              Calculated fill: <strong>{(manualPreview.fillMilliLitres / 1000).toFixed(3)} L</strong>
+              {' '}({manualPreview.previousTotalLitres} L previous to{' '}
+              {manualPreview.cumulativeTotalLitres} L current).
+              Confirm this calculated amount before{' '}
+              {isManualEntry ? 'saving the fuel record.' : 'submitting.'}
+            </p>
+            <p>
+              Top-row verification:{' '}
+              {manualPreview.topCurrentFillMilliLitres == null
+                ? 'not provided — confirm the calculated amount below'
+                : `${(manualPreview.topCurrentFillMilliLitres / 1000).toFixed(3)} L`}
+              {manualPreview.topCurrentFillMilliLitres == null
+                ? ''
+                : ` · difference ${((manualPreview.topCurrentFillMilliLitres - manualPreview.fillMilliLitres) / 1000).toFixed(3)} L`}
+            </p>
+            {manualPreview.topCurrentFillMilliLitres == null && (
+              <label className="meter-confirmation">
+                <input
+                  type="checkbox"
+                  checked={calculatedFillConfirmed}
+                  onChange={(event) => {
+                    setCalculatedFillConfirmed(event.target.checked);
+                  }}
+                />
+                I confirm the calculated fill amount.
+              </label>
+            )}
+          </div>
+        )}
+        {meterPhoto?.fillCalculation === 'global_total_difference' && (
+          <div className="notice" role="note">
+            <p>
+              Calculated fill:{' '}
+              <strong>
+                {meterPhoto.currentFillMilliLitres == null
+                  ? formatCurrentFill(meterPhoto.currentFillLitres)
+                  : formatMilliLitres(meterPhoto.currentFillMilliLitres)} L
+              </strong>
+              {' '}from {formatMilliLitres(meterPhoto.previousGlobalTotalInteger)} L to{' '}
+              {formatMilliLitres(meterPhoto.cumulativeTotalInteger)} L.
+              {meterPhoto.topCurrentFillMilliLitres == null
+                ? ` Confirm this amount before ${isManualEntry ? 'saving the fuel record.' : 'submitting.'}`
+                : ' The top-row value is verification evidence only.'}
+            </p>
+            {meterPhoto.topCurrentFillMilliLitres == null && (
+              <label className="meter-confirmation">
+                <input
+                  type="checkbox"
+                  checked={calculatedFillConfirmed}
+                  onChange={(event) => {
+                    setCalculatedFillConfirmed(event.target.checked);
+                  }}
+                />
+                I confirm the calculated fill amount.
+              </label>
+            )}
           </div>
         )}
         {submitError && <p className="auth-error" role="alert">{submitError}</p>}
@@ -1167,15 +1565,23 @@ function FuelForm({
           <span aria-hidden="true">✓</span>
           <p>{SUBMISSION_NOTICE}</p>
         </div>
+        {isManualEntry && (
+          <p className="manual-save-note">
+            Your manual entry will be saved when you select Save fuel record.
+          </p>
+        )}
         <button
           className="primary-button submit-button"
           type="submit"
           disabled={
             !activeVehicle ||
-            !meterPhoto?.verifiedAt ||
+            !readingsVerified ||
             !odometer.trim() ||
             !Number.isFinite(Number(odometer)) ||
             Number(odometer) < 0 ||
+            previewLoading ||
+            Boolean(manualPreviewError) ||
+            calculatedFillNeedsConfirmation ||
             submitting
           }
         >
@@ -1320,8 +1726,8 @@ function WorkflowGuide() {
       <h4 id="workflowGuideTitle">Brusna&apos;s pit stop</h4>
       <FuelMascotScene />
       <p className="mascot-story">
-        Our orange co-pilot is ready to roll. Capture the PIUSI display, check both
-        readings, then enter the odometer.
+        Our orange co-pilot is ready to roll. Capture the PIUSI display or enter
+        both readings manually, then enter the odometer.
       </p>
       <div className="workflow-status" role="note">
         <span className="workflow-status-dot" aria-hidden="true" />
@@ -1352,17 +1758,37 @@ function formatLitres(value) {
 function formatCurrentFill(value) {
   if (value == null) return 'Not recorded';
   const litres = Number(value);
-  return Number.isInteger(litres) ? String(litres) : formatLitres(litres);
+  return Number.isInteger(litres)
+    ? String(litres)
+    : litres.toLocaleString('en-GB', { maximumFractionDigits: 3 });
+}
+
+function formatMilliLitres(value) {
+  const milliLitres = Number(value);
+  const sign = milliLitres < 0 ? '-' : '';
+  const absoluteMilliLitres = Math.abs(milliLitres);
+  const wholeLitres = Math.floor(absoluteMilliLitres / 1000);
+  const fractionalDigits = String(absoluteMilliLitres % 1000).padStart(3, '0');
+  return `${sign}${wholeLitres.toLocaleString('en-GB')}.${fractionalDigits}`;
+}
+
+function formatRecordFill(record) {
+  return record.currentFillMilliLitres == null
+    ? formatCurrentFill(record.currentFillLitres ?? record.litres)
+    : formatMilliLitres(record.currentFillMilliLitres);
 }
 
 function formatCumulativeTotal(value) {
   if (value == null) return 'Not recorded';
-  return String(value);
+  return Number(value).toLocaleString('en-GB', {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3
+  });
 }
 
 function formatOcrCurrentFill(photo) {
   if (photo.ocrCurrentFillRawDigits) {
-    return `${photo.ocrCurrentFillRawDigits} litres`;
+    return `${formatMilliLitres(Number(photo.ocrCurrentFillRawDigits))} litres`;
   }
   if (photo.ocrCurrentFillLitres == null) return 'Not recorded';
   if (!Number.isInteger(photo.ocrCurrentFillLitres)) {
@@ -1373,12 +1799,9 @@ function formatOcrCurrentFill(photo) {
 
 function formatOcrCumulativeTotal(photo) {
   if (photo.ocrCumulativeTotalRawDigits) {
-    return `${photo.ocrCumulativeTotalRawDigits} litres`;
+    return `${formatMilliLitres(Number(photo.ocrCumulativeTotalRawDigits))} litres`;
   }
   if (photo.ocrCumulativeTotalLitres == null) return 'Not recorded';
-  if (!Number.isInteger(photo.ocrCumulativeTotalLitres)) {
-    return 'Needs manual review';
-  }
   return `${formatCumulativeTotal(photo.ocrCumulativeTotalLitres)} litres`;
 }
 
@@ -1434,7 +1857,7 @@ function emailReport(record) {
     `Fuel type: ${record.fuelType}`,
     `Mileage: ${formatMileage(record.mileageMiles)} mi`,
     `Tank capacity: ${record.capacity} litres`,
-    `Current Fill: ${formatCurrentFill(record.currentFillLitres ?? record.litres)} litres`,
+    `Current Fill: ${formatRecordFill(record)} litres`,
     `Cumulative Total: ${formatCumulativeTotal(record.cumulativeTotalLitres)} litres`,
     `Cumulative difference: ${formatLitres(record.meterDeltaLitres)} litres`,
     `Meter check: ${record.meterCheckStatus}`,
@@ -1494,7 +1917,7 @@ function HistorySection({
                   Mileage: {formatMileage(record.mileageMiles)} mi
                 </small>
                 <small>
-                  Current Fill: {formatCurrentFill(record.currentFillLitres ?? record.litres)} litres
+                  Current Fill: {formatRecordFill(record)} litres
                 </small>
                 <small>
                   Cumulative Total: {formatCumulativeTotal(record.cumulativeTotalLitres)} litres
@@ -1506,12 +1929,12 @@ function HistorySection({
                 )}
                 {record.meterCheckStatus === 'discrepancy' && (
                   <small className="meter-discrepancy" role="alert">
-                    Cumulative reading discrepancy - review required
+                    Cumulative reading discrepancy - saved with warning
                   </small>
                 )}
               </div>
               <div className="litres">
-                {formatCurrentFill(record.currentFillLitres ?? record.litres)} L
+                {formatRecordFill(record)} L
               </div>
               <small className="record-cost">
                 {record.cost != null ? `Cost: ${formatCost(record.cost)}` : 'Cost not supplied'}
@@ -1521,7 +1944,7 @@ function HistorySection({
                 <dl>
                   <div>
                     <dt>Current Fill</dt>
-                    <dd>{formatCurrentFill(record.currentFillLitres ?? record.litres)} litres</dd>
+                    <dd>{formatRecordFill(record)} litres</dd>
                   </div>
                   <div>
                     <dt>Cumulative Total</dt>
@@ -1537,7 +1960,9 @@ function HistorySection({
                   </div>
                   <div>
                     <dt>Meter photo reference</dt>
-                    <dd>{record.meterPhotoId ?? 'Not available'}</dd>
+                    <dd>
+                      {record.meterPhotoId ?? 'No photo — readings entered manually'}
+                    </dd>
                   </div>
                 </dl>
               </details>
@@ -1591,9 +2016,7 @@ function GlobalMeterDashboard({
     try {
       await onRecordEvent({
         eventType: data.get('eventType'),
-        baselineCumulativeTotalLitres: Number(
-          data.get('baselineCumulativeTotalLitres')
-        ),
+        baselineCumulativeTotalLitres: data.get('baselineCumulativeTotalLitres'),
         notes: data.get('notes')
       });
       form.reset();
@@ -1619,15 +2042,19 @@ function GlobalMeterDashboard({
         <article className="global-meter-total-card">
           <span className="global-meter-label">GLOBAL CUMULATIVE TOTAL</span>
           <strong>
-            {summary?.currentCumulativeTotalLitres == null
-              ? '--'
-              : formatCumulativeTotal(summary.currentCumulativeTotalLitres)}
+            {summary?.currentTotalInteger != null
+            ? formatMilliLitres(summary.currentTotalInteger)
+              : summary?.currentCumulativeTotalLitres == null
+                ? '--'
+                : formatCumulativeTotal(summary.currentCumulativeTotalLitres)}
             <span>L</span>
           </strong>
           <small>
             {summary?.lastUpdateSource === 'fill'
               ? 'Latest accepted cumulative meter reading'
-              : summary?.lastUpdateSource === 'reset' ||
+              : summary?.lastUpdateSource === 'baseline'
+                ? 'Administrator-verified starting baseline'
+                : summary?.lastUpdateSource === 'reset' ||
                   summary?.lastUpdateSource === 'replacement'
                 ? `Authorized meter ${summary.lastUpdateSource}`
                 : 'No meter reading has been accepted yet'}
@@ -1638,17 +2065,21 @@ function GlobalMeterDashboard({
           <div>
             <dt>Previous cumulative reading</dt>
             <dd>
-              {summary?.previousCumulativeTotalLitres == null
-                ? '--'
-                : `${formatCumulativeTotal(summary.previousCumulativeTotalLitres)} L`}
+              {summary?.previousTotalInteger != null
+                ? `${formatMilliLitres(summary.previousTotalInteger)} L`
+                : summary?.previousCumulativeTotalLitres == null
+                  ? '--'
+                  : `${formatCumulativeTotal(summary.previousCumulativeTotalLitres)} L`}
             </dd>
           </div>
           <div>
             <dt>Difference</dt>
             <dd>
-              {summary?.differenceLitres == null
-                ? '--'
-                : `${formatLitres(summary.differenceLitres)} L`}
+              {summary?.differenceInteger != null
+                ? `${formatMilliLitres(summary.differenceInteger)} L`
+                : summary?.differenceLitres == null
+                  ? '--'
+                  : `${formatLitres(summary.differenceLitres)} L`}
             </dd>
           </div>
           <div>
@@ -1722,7 +2153,11 @@ function GlobalMeterDashboard({
                     {entry.isDemo && (
                       <span className="global-meter-demo-tag">DEMO / TEST</span>
                     )}
-                    <strong>{formatCumulativeTotal(entry.cumulativeTotalLitres)} L</strong>
+                    <strong>
+                      {entry.cumulativeTotalInteger != null
+                        ? formatMilliLitres(entry.cumulativeTotalInteger)
+                        : formatCumulativeTotal(entry.cumulativeTotalLitres)} L
+                    </strong>
                     <time dateTime={entry.createdAt}>{formatDate(entry.createdAt)}</time>
                   </div>
                   <span className="global-meter-history-toggle">View details</span>
@@ -1739,16 +2174,48 @@ function GlobalMeterDashboard({
                     </div>
                     {entry.currentFillLitres != null && (
                       <div>
-                        <dt>Current fill</dt>
-                        <dd>{formatCurrentFill(entry.currentFillLitres)} L</dd>
+                        <dt>Calculated fill</dt>
+                        <dd>
+                          {entry.currentFillMilliLitres != null
+                            ? `${(entry.currentFillMilliLitres / 1000).toFixed(3)} L`
+                            : `${formatCurrentFill(entry.currentFillLitres)} L`}
+                        </dd>
                       </div>
                     )}
+                    {entry.topCurrentFillMilliLitres != null && (
+                      <>
+                        <div>
+                          <dt>Top-row fill</dt>
+                          <dd>
+                            {(entry.topCurrentFillMilliLitres / 1000).toFixed(3)} L
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Top vs calculated</dt>
+                          <dd>
+                            {entry.currentFillMilliLitres == null
+                              ? '--'
+                              : `${((entry.topCurrentFillMilliLitres - entry.currentFillMilliLitres) / 1000).toFixed(3)} L`}
+                          </dd>
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <dt>Previous accepted total</dt>
+                      <dd>
+                        {entry.previousTotalInteger == null
+                          ? '--'
+                          : `${formatMilliLitres(entry.previousTotalInteger)} L`}
+                      </dd>
+                    </div>
                     <div>
                       <dt>Difference</dt>
                       <dd>
-                        {entry.differenceLitres == null
-                          ? '--'
-                          : `${formatLitres(entry.differenceLitres)} L`}
+                        {entry.differenceInteger != null
+                          ? `${formatMilliLitres(entry.differenceInteger)} L`
+                          : entry.differenceLitres == null
+                            ? '--'
+                            : `${formatLitres(entry.differenceLitres)} L`}
                       </dd>
                     </div>
                     <div>
@@ -1757,7 +2224,26 @@ function GlobalMeterDashboard({
                         {entry.status}
                       </dd>
                     </div>
+                    <div>
+                      <dt>Reading source</dt>
+                      <dd>{entry.readingSource || '--'}</dd>
+                    </div>
+                    <div>
+                      <dt>Fill source</dt>
+                      <dd>{entry.fillSource || '--'}</dd>
+                    </div>
+                    <div>
+                      <dt>Verification</dt>
+                      <dd>{entry.status}</dd>
+                    </div>
                   </dl>
+                  {entry.warnings?.length > 0 && (
+                    <ul className="meter-ocr-warnings" aria-label="Meter warnings">
+                      {entry.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
                   {entry.notes && (
                     <p className="global-meter-history-note">
                       <strong>Notes</strong>
@@ -1788,7 +2274,7 @@ function GlobalMeterDashboard({
           </span>
           <div className="global-meter-event-copy">
             <p className="eyebrow">AUTHORIZED CHANGE</p>
-            <h4>Reset or replace the shared meter</h4>
+            <h4>Set, reset, or replace the shared meter</h4>
             <p>
               Changes the fleet-wide baseline and records the reason in the audit
               history.
@@ -1844,8 +2330,8 @@ function GlobalMeterDashboard({
             name="baselineCumulativeTotalLitres"
             type="number"
             min="0"
-            step="0.01"
-            placeholder="e.g. 125000.00"
+            step="1"
+            placeholder="e.g. 125000"
             required
           />
         </label>
@@ -1884,6 +2370,9 @@ function DashboardSection({
   const latestCurrentFill =
     latestRecord?.currentFillLitres ?? latestRecord?.litres ?? null;
   const lastOdometerMiles = vehicle?.lastRecordedOdometerMiles;
+  const recentReviewCount = recentRecords.filter(
+    (record) => record.meterCheckStatus === 'discrepancy'
+  ).length;
   const discrepancyCount = showFlaggedReadings
     ? records.filter((record) => record.meterCheckStatus === 'discrepancy').length
     : 0;
@@ -1891,7 +2380,9 @@ function DashboardSection({
   return (
     <section
       id="overview"
-      className={`overview-section${showRecentExpanded ? ' overview-section-user' : ''}`}
+      className={`overview-section${showRecentExpanded ? ' overview-section-user' : ''}${
+        showRecentExpanded && recentReviewCount ? ' has-review-alert' : ''
+      }`}
     >
       <header className="overview-header">
         <div>
@@ -1946,6 +2437,24 @@ function DashboardSection({
         </span>
       </div>
 
+      {recentReviewCount > 0 && (
+        <div className="overview-review-alert" role="status">
+          <span className="overview-review-alert-icon" aria-hidden="true">
+            !
+          </span>
+          <span>
+            <strong>
+              {recentReviewCount} recent reading
+              {recentReviewCount === 1 ? ' needs' : 's need'} review
+            </strong>
+            <small>
+              Check the meter details before relying on these recorded values.
+            </small>
+          </span>
+          <a href="#overviewRecent">Review activity</a>
+        </div>
+      )}
+
       <div
         className={`overview-metrics${showFlaggedReadings ? '' : ' overview-metrics-simple'}`}
       >
@@ -1957,7 +2466,11 @@ function DashboardSection({
             <span className="overview-metric-label">LATEST FILL</span>
           </div>
           <strong className="overview-metric-value">
-            {latestCurrentFill == null ? '--' : formatCurrentFill(latestCurrentFill)}
+            {latestCurrentFill == null
+              ? '--'
+              : latestRecord?.currentFillMilliLitres == null
+                ? formatCurrentFill(latestCurrentFill)
+                : formatMilliLitres(latestRecord.currentFillMilliLitres)}
             {latestCurrentFill != null && (
               <span className="overview-metric-unit">L</span>
             )}
@@ -2000,15 +2513,19 @@ function DashboardSection({
             <strong className="overview-metric-value">{discrepancyCount}</strong>
             <small>
               {discrepancyCount === 1
-                ? 'reading marked for review'
-                : 'readings marked for review'}
+                ? 'reading has a warning'
+                : 'readings have warnings'}
             </small>
           </article>
         )}
       </div>
 
       {showRecentActivity && (
-        <details className="overview-recent" open={showRecentExpanded}>
+        <details
+          className="overview-recent"
+          id="overviewRecent"
+          open={showRecentExpanded}
+        >
           <summary className="overview-recent-heading">
             <div>
               <p className="eyebrow">RECENT ACTIVITY</p>
@@ -2056,7 +2573,7 @@ function DashboardSection({
                     </span>
                     <div className="overview-fill-main">
                       <strong>
-                        {formatCurrentFill(record.currentFillLitres ?? record.litres)} L
+                        {formatRecordFill(record)} L
                       </strong>
                       <time
                         className="overview-fill-date"
@@ -3433,6 +3950,7 @@ function AdminSummaryTab({
   globalMeterHistory,
   loading,
   onOpenNct,
+  onOpenEmployeeRecords,
   onGlobalMeterEventCreated
 }) {
   const initialRange = getCurrentMonthRange();
@@ -3440,9 +3958,13 @@ function AdminSummaryTab({
   const [endDate, setEndDate] = useState(initialRange.endDate);
   const [summary, setSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [summaryError, setSummaryError] = useState('');
+  const [summaryLastUpdated, setSummaryLastUpdated] = useState(null);
+  const summaryRangeRef = useRef(initialRange);
+  const summaryRequestIdRef = useRef(0);
 
-  async function loadSummary(range) {
+  async function loadSummary(range, { background = false } = {}) {
     if (
       range.startDate &&
       range.endDate &&
@@ -3451,20 +3973,51 @@ function AdminSummaryTab({
       setSummaryError('The start date must be on or before the end date.');
       return;
     }
-    setSummaryLoading(true);
+    summaryRangeRef.current = range;
+    const requestId = ++summaryRequestIdRef.current;
+    if (background) {
+      setSummaryRefreshing(true);
+    } else {
+      setSummaryLoading(true);
+    }
     setSummaryError('');
     try {
       const result = await getAdminFuelSummary(range);
-      setSummary(result);
+      if (requestId === summaryRequestIdRef.current) {
+        setSummary(result);
+        setSummaryLastUpdated(new Date());
+      }
     } catch (error) {
-      setSummaryError(error.message);
+      if (requestId === summaryRequestIdRef.current) {
+        setSummaryError(error.message);
+      }
     } finally {
-      setSummaryLoading(false);
+      if (requestId === summaryRequestIdRef.current) {
+        setSummaryLoading(false);
+        setSummaryRefreshing(false);
+      }
     }
   }
 
   useEffect(() => {
     void loadSummary(initialRange);
+    const refreshVisibleSummary = () => {
+      if (document.visibilityState === 'visible') {
+        void loadSummary(summaryRangeRef.current, { background: true });
+      }
+    };
+    const refreshInterval = window.setInterval(
+      refreshVisibleSummary,
+      15_000
+    );
+    window.addEventListener('focus', refreshVisibleSummary);
+    document.addEventListener('visibilitychange', refreshVisibleSummary);
+    return () => {
+      window.clearInterval(refreshInterval);
+      window.removeEventListener('focus', refreshVisibleSummary);
+      document.removeEventListener('visibilitychange', refreshVisibleSummary);
+      summaryRequestIdRef.current += 1;
+    };
   }, []);
 
   function handleSubmit(event) {
@@ -3532,6 +4085,16 @@ function AdminSummaryTab({
             <button
               className="outline-button"
               type="button"
+              disabled={summaryLoading || summaryRefreshing}
+              onClick={() =>
+                void loadSummary(summaryRangeRef.current, { background: true })
+              }
+            >
+              {summaryRefreshing ? 'Refreshing...' : 'Refresh summary'}
+            </button>
+            <button
+              className="outline-button"
+              type="button"
               onClick={handleAllDates}
             >
               All available dates
@@ -3544,6 +4107,9 @@ function AdminSummaryTab({
           <p className="admin-available-dates">
             Available records: {formatDateOnly(summary.availableFrom)} to{' '}
             {formatDateOnly(summary.availableTo)}. Showing: {selectedPeriod}.
+            {summaryLastUpdated && (
+              <> Last updated {summaryLastUpdated.toLocaleTimeString()}.</>
+            )}
           </p>
         )}
 
@@ -3593,6 +4159,112 @@ function AdminSummaryTab({
               ) : (
                 <p className="global-meter-empty">
                   No vehicle fills were recorded for this period.
+                </p>
+              )}
+            </section>
+            <section
+              className="admin-recent-records"
+              aria-labelledby="adminRecentRecordsTitle"
+            >
+              <header className="admin-recent-records-heading">
+                <div>
+                  <p className="eyebrow">LATEST ACCEPTED ENTRIES</p>
+                  <h4 id="adminRecentRecordsTitle">Recent fuel records</h4>
+                  <p>
+                    Manual, OCR, and calculated fills in the selected date range.
+                    Refreshes automatically every 15 seconds.
+                  </p>
+                </div>
+                <button
+                  className="outline-button"
+                  type="button"
+                  onClick={onOpenEmployeeRecords}
+                >
+                  Browse employee records
+                </button>
+              </header>
+              {summary.recentRecords.length ? (
+                <div className="admin-recent-records-table-wrap" role="region" aria-label="Recent fuel records" tabIndex="0">
+                  <table className="admin-recent-records-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Date</th>
+                        <th scope="col">Employee</th>
+                        <th scope="col">Vehicle</th>
+                        <th scope="col">Fill</th>
+                        <th scope="col">Top-row evidence</th>
+                        <th scope="col">Top difference</th>
+                        <th scope="col">Mileage</th>
+                        <th scope="col">Previous total</th>
+                        <th scope="col">Global total</th>
+                        <th scope="col">Fill source</th>
+                        <th scope="col">Reading source</th>
+                        <th scope="col">Verification</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.recentRecords.map((record) => (
+                        <tr key={record.id}>
+                          <td>{formatDate(record.createdAt)}</td>
+                          <td>{record.employeeName}</td>
+                          <td>{record.regNumber}</td>
+                          <td>{formatLitres(record.currentFillLitres)} L</td>
+                          <td>
+                            {record.topCurrentFillMilliLitres == null
+                              ? 'Missing'
+                              : `${(record.topCurrentFillMilliLitres / 1000).toFixed(3)} L`}
+                          </td>
+                          <td>
+                            {record.topCurrentFillMilliLitres == null
+                              ? '—'
+                              : record.currentFillMilliLitres == null
+                                ? '—'
+                                : `${((record.topCurrentFillMilliLitres - record.currentFillMilliLitres) / 1000).toFixed(3)} L`}
+                          </td>
+                          <td>{formatMileage(record.mileageMiles)} mi</td>
+                          <td>
+                            {record.previousGlobalTotalInteger == null
+                              ? '—'
+                              : `${formatMilliLitres(record.previousGlobalTotalInteger)} L`}
+                          </td>
+                          <td>
+                            {record.cumulativeTotalInteger == null
+                              ? '—'
+                              : `${formatMilliLitres(record.cumulativeTotalInteger)} L`}
+                          </td>
+                          <td>
+                            <span
+                              className={`admin-record-source admin-record-source--${record.meterReadingSource}`}
+                            >
+                              {record.meterReadingSource}
+                            </span>
+                          </td>
+                          <td>{record.readingSource || 'legacy'}</td>
+                          <td>
+                            <span
+                              className={`admin-record-source admin-record-source--${record.meterCheckStatus}`}
+                            >
+                              {record.meterCheckStatus}
+                            </span>
+                            {record.meterWarnings?.length > 0 && (
+                              <details>
+                                <summary>Warnings ({record.meterWarnings.length})</summary>
+                                <ul>
+                                  {record.meterWarnings.map((warning) => (
+                                    <li key={warning}>{warning}</li>
+                                  ))}
+                                </ul>
+                              </details>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="admin-recent-records-empty">
+                  No fuel records were found for this date range.
                 </p>
               )}
             </section>
@@ -3985,6 +4657,249 @@ function NctMonitoring() {
   );
 }
 
+function AdminMeterReadingReviews() {
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState('');
+  const [reviewNotes, setReviewNotes] = useState({});
+  const [savingId, setSavingId] = useState(null);
+  const [actionError, setActionError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  async function loadReviews() {
+    setLoading(true);
+    setLoadingError('');
+    try {
+      setReviews(await getAdminMeterReadingReviews());
+    } catch (error) {
+      setLoadingError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadReviews();
+  }, []);
+
+  async function decide(review, decision) {
+    const note = (reviewNotes[review.id] || '').trim();
+    if (!note) {
+      setActionError('Add a review note before approving or rejecting.');
+      return;
+    }
+    setSavingId(review.id);
+    setActionError('');
+    setNotice('');
+    try {
+      await decideAdminMeterReadingReview(review.id, decision, note);
+      setNotice(
+        decision === 'approve'
+          ? 'Reading approved and the global total was updated.'
+          : 'Reading rejected; the global total was not changed.'
+      );
+      await loadReviews();
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  return (
+    <section className="admin-meter-review" aria-busy={loading}>
+      <header className="admin-meter-review-header">
+        <div>
+          <p className="eyebrow">METER EXCEPTIONS</p>
+          <h2>Readings to review</h2>
+          <p>Flagged readings wait here and do not change the global total until approved.</p>
+        </div>
+        <div className="admin-meter-review-tools">
+          <span className="admin-meter-review-count" aria-live="polite">
+            {loading ? 'Loading queue' : `${reviews.length} awaiting review`}
+          </span>
+          <button
+            className="outline-button"
+            type="button"
+            onClick={() => void loadReviews()}
+            disabled={loading}
+            aria-busy={loading}
+          >
+            {loading ? 'Refreshing...' : 'Refresh queue'}
+          </button>
+        </div>
+      </header>
+      {actionError && <p className="auth-error" role="alert">{actionError}</p>}
+      {notice && <p className="notice" role="status">{notice}</p>}
+      {loading ? (
+        <div className="admin-meter-review-state" role="status">
+          <span className="admin-meter-review-spinner" aria-hidden="true" />
+          <p>Loading the review queue...</p>
+        </div>
+      ) : loadingError ? (
+        <div className="admin-meter-review-state admin-meter-review-state--error">
+          <p role="alert">{loadingError}</p>
+          <button className="outline-button" type="button" onClick={() => void loadReviews()}>
+            Try again
+          </button>
+        </div>
+      ) : reviews.length === 0 ? (
+        <div className="admin-meter-review-empty">
+          <span className="admin-meter-review-empty-icon">
+            <AppIcon name="check" size={20} />
+          </span>
+          <div>
+            <h3>All caught up</h3>
+            <p>No meter readings are waiting for administrator review.</p>
+          </div>
+        </div>
+      ) : (
+        <div className="admin-meter-review-list">
+          {reviews.map((review) => (
+            <article className="admin-meter-review-card" key={review.id}>
+              <header className="admin-meter-review-card-header">
+                <div>
+                  <p className="eyebrow">PENDING DECISION</p>
+                  <h3>Reading #{review.id}</h3>
+                </div>
+                <span className="admin-meter-review-source">
+                  {(review.readingSource || 'unknown').toUpperCase()}
+                </span>
+              </header>
+              <div className="admin-meter-review-card-content">
+                <div className="admin-meter-review-reading">
+                  <div className="admin-meter-review-metrics">
+                    <div className="admin-meter-review-metric">
+                      <span>Fill amount</span>
+                      <strong>
+                        {review.currentFillMilliLitres == null
+                          ? 'Not provided'
+                          : `${(review.currentFillMilliLitres / 1000).toFixed(3)} L`}
+                      </strong>
+                    </div>
+                    <div className="admin-meter-review-metric">
+                      <span>New global total</span>
+                      <strong>
+                        {review.cumulativeTotalInteger == null
+                          ? 'Unreadable'
+                          : `${formatMilliLitres(review.cumulativeTotalInteger)} L`}
+                      </strong>
+                    </div>
+                    <div className="admin-meter-review-metric">
+                      <span>Previous accepted</span>
+                      <strong>
+                        {review.previousGlobalTotalInteger == null
+                          ? 'Not established'
+                          : `${formatMilliLitres(review.previousGlobalTotalInteger)} L`}
+                      </strong>
+                    </div>
+                    <div className="admin-meter-review-metric">
+                      <span>Top-row evidence</span>
+                      <strong>
+                        {review.topCurrentFillMilliLitres == null
+                          ? 'Missing'
+                          : `${(review.topCurrentFillMilliLitres / 1000).toFixed(3)} L`}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="admin-meter-review-raw">
+                    <div>
+                      <span>Raw TOP digits</span>
+                      <code>{review.currentFillRawDigits || 'Missing'}</code>
+                    </div>
+                    <div>
+                      <span>Raw TOTAL digits</span>
+                      <code>{review.cumulativeTotalRawDigits || 'Missing'}</code>
+                    </div>
+                  </div>
+                  {review.fillCalculation === 'global_total_difference' && (
+                    <p className="admin-meter-review-calculated">
+                      Fill calculated from the global-total difference
+                    </p>
+                  )}
+                  <div className="admin-meter-review-warnings">
+                    <strong>
+                      {review.warnings?.length
+                        ? `${review.warnings.length} reason${review.warnings.length === 1 ? '' : 's'} flagged`
+                        : 'Flagged for administrator review'}
+                    </strong>
+                    {review.warnings?.length > 0 ? (
+                      <ul>
+                        {review.warnings.map((warning) => (
+                          <li key={warning}>{warning}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>Check the evidence and readings before deciding.</p>
+                    )}
+                  </div>
+                </div>
+                <div className="admin-meter-review-decision">
+                  {review.meterPhotoId ? (
+                    <figure className="admin-meter-review-evidence">
+                      <img
+                        src={apiUrl(`/api/meter-photos/${review.meterPhotoId}/content`)}
+                        alt={`Original meter photo for reading ${review.id}`}
+                        loading="lazy"
+                      />
+                      <figcaption>Original meter photo</figcaption>
+                    </figure>
+                  ) : (
+                    <div className="admin-meter-review-no-evidence">
+                      No photo was attached to this reading.
+                    </div>
+                  )}
+                  <label className="admin-meter-review-note">
+                    <span>Review note <em>Required</em></span>
+                    <textarea
+                      rows="3"
+                      maxLength="500"
+                      required
+                      value={reviewNotes[review.id] || ''}
+                      onChange={(event) =>
+                        setReviewNotes((current) => ({
+                          ...current,
+                          [review.id]: event.target.value
+                        }))
+                      }
+                      placeholder="Explain what you checked and why you are approving or rejecting."
+                    />
+                    <small>A note is saved with either decision for the audit trail.</small>
+                  </label>
+                  <div className="admin-meter-review-actions">
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={
+                        savingId === review.id ||
+                        !(reviewNotes[review.id] || '').trim()
+                      }
+                      onClick={() => void decide(review, 'approve')}
+                    >
+                      {savingId === review.id ? 'Saving...' : 'Approve reading'}
+                    </button>
+                    <button
+                      className="outline-button"
+                      type="button"
+                      disabled={
+                        savingId === review.id ||
+                        !(reviewNotes[review.id] || '').trim()
+                      }
+                      onClick={() => void decide(review, 'reject')}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AdminWorkspaceTabs({
   activeTab,
   globalMeter,
@@ -4016,6 +4931,7 @@ function AdminWorkspaceTabs({
         globalMeterHistory={globalMeterHistory}
         loading={loading}
         onOpenNct={() => onChangeTab('adminNct')}
+        onOpenEmployeeRecords={() => onChangeTab('adminEmployees')}
         onGlobalMeterEventCreated={onGlobalMeterEventCreated}
       />
     );
@@ -4023,12 +4939,16 @@ function AdminWorkspaceTabs({
   if (activeTab === 'adminRegistry') {
     return <AdminPanel onNotify={onNotify} />;
   }
+  if (activeTab === 'adminMeterReviews') {
+    return <AdminMeterReadingReviews />;
+  }
   return (
     <AdminSummaryTab
       globalMeter={globalMeter}
       globalMeterHistory={globalMeterHistory}
       loading={loading}
       onOpenNct={() => onChangeTab('adminNct')}
+      onOpenEmployeeRecords={() => onChangeTab('adminEmployees')}
       onGlobalMeterEventCreated={onGlobalMeterEventCreated}
     />
   );
@@ -4138,6 +5058,16 @@ function Workspace({
               >
                 <AppIcon name="registry" />
                 Registry
+              </button>
+              <button
+                className={activeSection === 'adminMeterReviews' ? 'active' : ''}
+                type="button"
+                role="tab"
+                aria-selected={activeSection === 'adminMeterReviews'}
+                onClick={() => setActiveSection('adminMeterReviews')}
+              >
+                <AppIcon name="review" />
+                Meter review
               </button>
               <button
                 className={activeSection === 'adminNct' ? 'active' : ''}
@@ -4258,12 +5188,6 @@ function Workspace({
           <div
             className={`topbar-actions${!isAdmin ? ' employee-topbar-actions' : ''}`}
           >
-            <div className="topbar-utility-actions">
-              <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-              <button className="text-button" type="button" onClick={onLogout}>
-                Sign out <span>-&gt;</span>
-              </button>
-            </div>
             {!isAdmin && (
               <a
                 className="topbar-primary-action"
@@ -4272,9 +5196,14 @@ function Workspace({
               >
                 <AppIcon name="fuel" size={15} />
                 <span>Record a fill</span>
-                <span aria-hidden="true">&darr;</span>
               </a>
             )}
+            <div className="topbar-utility-actions">
+              <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+              <button className="text-button" type="button" onClick={onLogout}>
+                Sign out <span>-&gt;</span>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -4514,10 +5443,16 @@ export default function App() {
 
   async function handleRecordCreated(record) {
     await loadWorkspaceData(employee);
+    if (record.status === 'review_pending') {
+      setToast(
+        'Reading submitted for administrator review. It has not been saved as a fuel transaction yet.'
+      );
+      return;
+    }
     setToast(
-      record.meterCheckStatus === 'discrepancy'
-        ? 'Fuel record saved with a cumulative meter discrepancy for review.'
-        : 'Fuel record saved.'
+      record.record?.meterWarnings?.length
+        ? 'Fuel record saved to the dashboard with meter warnings.'
+        : 'Fuel record saved to the dashboard.'
     );
   }
 

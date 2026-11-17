@@ -1128,6 +1128,32 @@ select:focus-visible {
   color: #10221b;
 }
 
+@media (min-width: 901px) {
+  .employee-app-shell .employee-topbar-actions {
+    width: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: nowrap;
+  }
+
+  .employee-app-shell .topbar-utility-actions {
+    justify-content: flex-end;
+    gap: 12px;
+  }
+
+  .employee-app-shell .topbar-primary-action {
+    width: auto;
+    min-width: 148px;
+    min-height: 42px;
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 0 16px;
+    border-radius: 11px;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--teal) 18%, transparent);
+  }
+}
+
 .text-button {
   color: var(--teal);
 }
@@ -1585,6 +1611,10 @@ select:focus-visible {
   grid-area: header;
 }
 
+.overview-section-user.has-review-alert .overview-review-alert {
+  grid-area: review;
+}
+
 .overview-section-user .overview-vehicle-card {
   grid-area: vehicle;
 }
@@ -1598,13 +1628,93 @@ select:focus-visible {
   grid-area: recent;
 }
 
+.overview-review-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--orange) 42%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--orange) 8%, var(--surface));
+}
+
+.overview-review-alert-icon {
+  display: grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--orange) 17%, var(--surface));
+  color: var(--orange);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.overview-review-alert > span:nth-child(2) {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.overview-review-alert strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.overview-review-alert small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.overview-review-alert a {
+  flex: 0 0 auto;
+  color: var(--teal);
+  font-size: 10px;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.overview-review-alert a:hover {
+  text-decoration: underline;
+}
+
+.overview-section-user .overview-header {
+  align-items: center;
+}
+
+.overview-section-user .overview-subtitle {
+  max-width: 52ch;
+  font-size: 12px;
+}
+
+.overview-section-user .overview-vehicle-card {
+  min-height: 76px;
+  padding: 12px 14px;
+}
+
+.overview-section-user .overview-vehicle-label {
+  font-size: 10px;
+}
+
+.overview-section-user .overview-vehicle-copy strong {
+  font-size: 15px;
+}
+
+.overview-section-user .overview-vehicle-copy small {
+  font-size: 10px;
+}
+
 .overview-section-user .overview-metrics-simple {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .overview-section-user .overview-metric {
-  min-height: 108px;
-  padding: 12px;
+  min-height: 116px;
+  padding: 13px;
 }
 
 .overview-section-user .overview-metric-featured {
@@ -1623,7 +1733,8 @@ select:focus-visible {
 }
 
 .overview-section-user .overview-metric-value {
-  font-size: clamp(20px, 2vw, 26px);
+  font-size: clamp(18px, 1.8vw, 24px);
+  letter-spacing: -0.035em;
 }
 
 .overview-section-user .overview-metric-featured .overview-metric-value {
@@ -1635,7 +1746,7 @@ select:focus-visible {
   gap: 9px;
   min-width: 0;
   margin: 0;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid var(--line);
   border-radius: 13px;
   background: var(--surface-muted);
@@ -1681,11 +1792,11 @@ select:focus-visible {
 }
 
 .overview-section-user .overview-fill-main strong {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .overview-section-user .overview-fill-date {
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .overview-section-user .overview-fill-details {
@@ -1704,12 +1815,19 @@ select:focus-visible {
 @media (min-width: 901px) {
   .overview-section-user {
     grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-    grid-template-rows: auto auto auto;
     grid-template-areas:
       'header header'
       'metrics recent'
       'vehicle recent';
     align-items: stretch;
+  }
+
+  .overview-section-user.has-review-alert {
+    grid-template-areas:
+      'header header'
+      'review review'
+      'metrics recent'
+      'vehicle recent';
   }
 
   .overview-section-user .overview-recent {
@@ -1734,6 +1852,57 @@ select:focus-visible {
       'vehicle'
       'metrics'
       'recent';
+  }
+
+  .overview-section-user.has-review-alert {
+    grid-template-areas:
+      'header'
+      'vehicle'
+      'review'
+      'metrics'
+      'recent';
+  }
+
+  .overview-review-alert {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .overview-review-alert a {
+    margin-left: 35px;
+  }
+}
+
+@media (max-width: 520px) {
+  .overview-review-alert {
+    display: grid;
+    grid-template-columns: 25px minmax(0, 1fr);
+  }
+
+  .overview-review-alert > a {
+    grid-column: 2;
+    margin-left: 0;
+  }
+
+  .overview-section-user .overview-metric {
+    min-height: 104px;
+    padding: 10px;
+  }
+
+  .overview-section-user .overview-metric-heading {
+    gap: 6px;
+  }
+
+  .overview-section-user .overview-metric-label {
+    font-size: 8px;
+  }
+
+  .overview-section-user .overview-metric-value {
+    font-size: clamp(16px, 5vw, 21px);
+  }
+
+  .overview-section-user .overview-metric-featured .overview-metric-value {
+    font-size: clamp(20px, 6vw, 27px);
   }
 }
 
@@ -1781,6 +1950,11 @@ select:focus-visible {
 :root[data-theme='dark'] .overview-section-user .overview-recent {
   border-color: #304137;
   background: #131c17;
+}
+
+:root[data-theme='dark'] .overview-review-alert {
+  border-color: color-mix(in srgb, var(--orange) 44%, #304137);
+  background: color-mix(in srgb, var(--orange) 10%, #17221c);
 }
 
 :root[data-theme='dark'] .overview-section-user .overview-fill-item {
@@ -2484,6 +2658,18 @@ select:focus-visible {
   font-size: 10px;
 }
 
+.manual-save-note {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--teal);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 13px 15px;
+}
+
 .transaction-form .submit-button {
   width: 100%;
   min-height: 50px;
@@ -2656,6 +2842,386 @@ select:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .cat-eyes,
   .cat-head-motion {
+    animation: none;
+  }
+}
+
+.admin-meter-review {
+  display: grid;
+  gap: 22px;
+  margin: 0 auto;
+  max-width: 1160px;
+  min-width: 0;
+  padding: clamp(16px, 2.5vw, 30px);
+}
+
+.admin-meter-review-header,
+.admin-meter-review-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.admin-meter-review-header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 20px;
+}
+
+.admin-meter-review-header h2 {
+  font-size: clamp(22px, 3vw, 30px);
+  margin: 4px 0 7px;
+}
+
+.admin-meter-review-header p:not(.eyebrow) {
+  color: var(--muted);
+  line-height: 1.55;
+  margin: 0;
+  max-width: 620px;
+}
+
+.admin-meter-review-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-meter-review-count,
+.admin-meter-review-source {
+  align-items: center;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.03em;
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
+.admin-meter-review-list {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-meter-review-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--card-shadow);
+  min-width: 0;
+  overflow: hidden;
+}
+
+.admin-meter-review-card-header {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 18px clamp(16px, 2.5vw, 24px);
+}
+
+.admin-meter-review-card-header .eyebrow {
+  margin: 0 0 5px;
+}
+
+.admin-meter-review-card-header h3 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.admin-meter-review-source {
+  color: var(--teal);
+}
+
+.admin-meter-review-card-content {
+  display: grid;
+  gap: clamp(18px, 2.5vw, 28px);
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+  padding: clamp(16px, 2.5vw, 24px);
+}
+
+.admin-meter-review-reading,
+.admin-meter-review-decision {
+  align-content: start;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.admin-meter-review-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-meter-review-metric {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  padding: 13px;
+}
+
+.admin-meter-review-metric span,
+.admin-meter-review-raw span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-meter-review-metric strong {
+  font-size: clamp(14px, 1.7vw, 18px);
+  overflow-wrap: anywhere;
+}
+
+.admin-meter-review-raw {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.admin-meter-review-raw > div {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.admin-meter-review-raw code {
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.admin-meter-review-calculated {
+  background: color-mix(in srgb, var(--teal) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--teal) 26%, var(--line));
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.admin-meter-review-warnings {
+  background: color-mix(in srgb, var(--orange) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--orange) 42%, var(--line));
+  border-radius: 12px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 14px;
+}
+
+.admin-meter-review-warnings > strong {
+  display: block;
+  margin-bottom: 7px;
+}
+
+.admin-meter-review-warnings ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.admin-meter-review-warnings li + li {
+  margin-top: 5px;
+}
+
+.admin-meter-review-warnings p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.admin-meter-review-evidence {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin: 0;
+  overflow: hidden;
+}
+
+.admin-meter-review-evidence img {
+  display: block;
+  max-height: 340px;
+  object-fit: contain;
+  width: 100%;
+}
+
+.admin-meter-review-evidence figcaption {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 10px;
+  padding: 9px 12px;
+}
+
+.admin-meter-review-no-evidence {
+  background: var(--surface-muted);
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 16px;
+}
+
+.admin-meter-review-note {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-meter-review-note > span {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.admin-meter-review-note em {
+  color: var(--orange);
+  font-size: 10px;
+  font-style: normal;
+  text-transform: uppercase;
+}
+
+.admin-meter-review-note textarea {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  display: block;
+  line-height: 1.5;
+  min-height: 92px;
+  padding: 11px 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.admin-meter-review-note small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.admin-meter-review-actions {
+  justify-content: flex-start;
+}
+
+.admin-meter-review-actions > button {
+  flex: 1 1 140px;
+}
+
+.admin-meter-review-actions > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.admin-meter-review-state,
+.admin-meter-review-empty {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  display: flex;
+  gap: 14px;
+  min-height: 120px;
+  padding: 22px;
+}
+
+.admin-meter-review-state p,
+.admin-meter-review-empty p {
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.admin-meter-review-state--error {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.admin-meter-review-empty-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--teal) 12%, var(--surface));
+  border-radius: 50%;
+  color: var(--teal);
+  display: inline-flex;
+  flex: 0 0 42px;
+  height: 42px;
+  justify-content: center;
+}
+
+.admin-meter-review-empty h3 {
+  font-size: 16px;
+  margin: 0 0 5px;
+}
+
+.admin-meter-review-spinner {
+  animation: admin-meter-review-spin 800ms linear infinite;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  border-top-color: var(--teal);
+  flex: 0 0 20px;
+  height: 20px;
+  width: 20px;
+}
+
+@keyframes admin-meter-review-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 800px) {
+  .admin-meter-review-card-content {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-meter-review-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-meter-review-tools {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .admin-meter-review-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-meter-review-metric {
+    align-items: center;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .admin-meter-review-raw {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-meter-review-spinner {
     animation: none;
   }
 }
@@ -2995,6 +3561,10 @@ select:focus-visible {
 .meter-review-form {
   display: grid;
   gap: 12px;
+}
+
+.manual-entry-button {
+  justify-self: start;
 }
 
 .meter-review-form > p {
@@ -5059,6 +5629,122 @@ footer {
 .admin-top-vehicles li b {
   justify-self: end;
   font-variant-numeric: tabular-nums;
+}
+
+.admin-recent-records {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+  min-width: 0;
+  padding: clamp(16px, 2vw, 22px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.admin-recent-records-heading {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.admin-recent-records-heading .eyebrow {
+  margin: 0;
+}
+
+.admin-recent-records-heading h4 {
+  color: var(--ink);
+  margin: 5px 0;
+}
+
+.admin-recent-records-heading p:not(.eyebrow) {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.admin-recent-records-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  max-width: 100%;
+  overflow: auto;
+  scrollbar-color: var(--muted) var(--surface-muted);
+}
+
+.admin-recent-records-table {
+  border-collapse: collapse;
+  min-width: 900px;
+  width: 100%;
+}
+
+.admin-recent-records-table th,
+.admin-recent-records-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 12px 14px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-recent-records-table th {
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-recent-records-table td {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.admin-recent-records-table td:nth-child(4),
+.admin-recent-records-table td:nth-child(5),
+.admin-recent-records-table td:nth-child(6) {
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-recent-records-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-recent-records-table tbody tr:hover {
+  background: var(--surface-muted);
+}
+
+.admin-record-source {
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 5px 9px;
+  text-transform: uppercase;
+}
+
+.admin-record-source--manual,
+.admin-record-source--ocr {
+  color: var(--teal);
+}
+
+.admin-record-source--calculated {
+  color: var(--orange);
+}
+
+.admin-recent-records-empty {
+  background: var(--surface-muted);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+  padding: 14px;
 }
 
 .admin-vehicle-rank {
@@ -7913,5 +8599,45 @@ footer {
 
   .content.content-admin-employees .topbar {
     grid-template-areas: none;
+  }
+}
+
+@media (max-width: 900px) and (hover: none) and (pointer: coarse) {
+  .login-screen :is(
+      input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='file']):not([type='color']),
+      select,
+      textarea
+    ),
+  .app-shell :is(
+      input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='file']):not([type='color']),
+      select,
+      textarea
+    ),
+  .boss-dashboard :is(
+      input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='hidden']):not([type='file']):not([type='color']),
+      select,
+      textarea
+    ) {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .app-shell .sidebar nav a,
+  .sidebar nav .admin-sidebar-tabs button,
+  .boss-header-nav a,
+  .boss-dashboard-tabs button,
+  .boss-range-switch button,
+  .boss-icon-button,
+  .boss-profile-button {
+    min-height: 44px;
+  }
+
+  .boss-icon-button {
+    min-width: 44px;
+  }
+
+  .boss-header-nav a {
+    display: inline-flex;
+    align-items: center;
   }
 }

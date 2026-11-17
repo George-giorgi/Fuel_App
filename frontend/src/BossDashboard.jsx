@@ -926,9 +926,11 @@ export default function BossDashboard({
               <KpiCard
                 label="Global meter"
                 value={
-                  meter?.currentCumulativeTotalLitres == null
-                    ? '—'
-                    : `${formatNumber(meter.currentCumulativeTotalLitres, 1)} L`
+                  meter?.currentTotalInteger != null
+                    ? `${formatNumber(meter.currentTotalInteger / 1000, 3)} L`
+                    : meter?.currentCumulativeTotalLitres == null
+                      ? '—'
+                      : `${formatNumber(meter.currentCumulativeTotalLitres, 1)} L`
                 }
                 meta={
                   meter?.lastUpdatedAt

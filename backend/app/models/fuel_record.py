@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    BigInteger,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     false,
     text,
@@ -87,9 +89,35 @@ class FuelRecord(Base):
     current_fill_litres: Mapped[float | None] = mapped_column(Float, nullable=True)
     cumulative_total_litres: Mapped[float | None] = mapped_column(Float, nullable=True)
     meter_delta_litres: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_fill_milli_litres: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    top_current_fill_milli_litres: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    cumulative_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    previous_global_total_integer: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
+    current_fill_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    cumulative_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    meter_reading_source: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="legacy", server_default=text("'legacy'")
+    )
+    reading_source: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    fill_calculation: Mapped[str | None] = mapped_column(
+        String(24), nullable=True
+    )
     meter_check_status: Mapped[str] = mapped_column(
         String(20), nullable=False, default="legacy", server_default=text("'legacy'")
     )
+    meter_warnings: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     meter_epoch: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
     )

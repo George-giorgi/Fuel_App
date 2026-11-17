@@ -87,6 +87,13 @@ export function createFuelRecord(record) {
   });
 }
 
+export function previewFuelReading(reading) {
+  return apiRequest('/api/fuel-records/preview', {
+    method: 'POST',
+    body: JSON.stringify(reading)
+  });
+}
+
 export function getAssignedVehicle() {
   return apiRequest('/api/vehicles/me');
 }
@@ -277,10 +284,11 @@ export function startMeterPhotoSession(vehicleId = null) {
   });
 }
 
-export function uploadMeterPhoto(sessionToken, photo) {
+export function uploadMeterPhoto(sessionToken, photo, readingMode = 'ocr') {
   const body = new FormData();
   body.append('session_token', sessionToken);
   body.append('photo', photo);
+  body.append('reading_mode', readingMode);
   return apiRequest('/api/meter-photos', { method: 'POST', body });
 }
 
@@ -289,6 +297,10 @@ export function verifyMeterPhoto(meterPhotoId, readings) {
     method: 'PATCH',
     body: JSON.stringify(readings)
   });
+}
+
+export function getMeterPhotoPolicy() {
+  return apiRequest('/api/meter-photos/policy');
 }
 
 export function createVehicleMeterEvent(vehicleId, event) {
@@ -310,5 +322,16 @@ export function createGlobalMeterEvent(event) {
   return apiRequest('/api/management/global-meter/events', {
     method: 'POST',
     body: JSON.stringify(event)
+  });
+}
+
+export function getAdminMeterReadingReviews() {
+  return apiRequest('/api/admin/meter-reading-reviews');
+}
+
+export function decideAdminMeterReadingReview(reviewId, decision, note) {
+  return apiRequest(`/api/admin/meter-reading-reviews/${reviewId}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, note })
   });
 }
