@@ -19,7 +19,6 @@ import {
   getFuelRecords,
   getGlobalMeterHistory,
   getGlobalMeterSummary,
-  getMeterPhotoPolicy,
   getNctAlerts,
   getVehicleFuelRecords,
   getVehicleNctList,
@@ -39,7 +38,10 @@ import {
 import {
   formatMileage
 } from './utils/distance.js';
-import { ocrValueToRawDigits } from './utils/meterReadings.js';
+import {
+  formatRawMeterDigitsAsLitres,
+  ocrValueToRawDigits
+} from './utils/meterReadings.js';
 
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 const SUBMISSION_NOTICE =
@@ -395,22 +397,6 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
   const [manualCumulativeTotalDraft, setManualCumulativeTotalDraft] = useState('');
   const [manualEvidenceFile, setManualEvidenceFile] = useState(null);
   const [manualConfirmed, setManualConfirmed] = useState(false);
-  const [manualEntryEnabled, setManualEntryEnabled] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    getMeterPhotoPolicy().then((policy) => {
-      if (active) setManualEntryEnabled(policy.manual_entry_enabled);
-    }).catch((policyError) => {
-      if (active) {
-        setManualEntryEnabled(false);
-        setError(`Could not load manual-entry policy: ${policyError.message}`);
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!previewUrl) return undefined;
@@ -584,14 +570,14 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
   async function handleManualConfirm(event) {
     event.preventDefault();
     if (!manualConfirmed) return;
+    if (!manualEvidenceFile) {
+      setError('A meter photo is required before confirming manual readings.');
+      return;
+    }
     const readings = {
       currentFillRawDigits: manualCurrentFillDraft.trim() || undefined,
       cumulativeTotalRawDigits: manualCumulativeTotalDraft.trim()
     };
-    if (!manualEvidenceFile) {
-      onManualReadings(readings);
-      return;
-    }
     setVerifying(true);
     setError('');
     try {
@@ -655,25 +641,17 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             aria-label="PIUSI display reading order"
           >
             <p><strong>Large top row:</strong> raw fill digits ÷ 1,000 = litres</p>
-            <p><strong>Smaller TOTAL row:</strong> whole-litre cumulative digits</p>
+            <p><strong>Smaller TOTAL row:</strong> raw digits ÷ 1,000 = litres</p>
           </div>
         </div>
       </div>
-      {manualEntryEnabled && entryMode === 'photo' && !photo && !pendingPhoto && (
-        <button
-          className="outline-button manual-entry-button"
-          type="button"
-          onClick={enterManualMode}
-        >
-          Enter readings manually without a photo
-        </button>
-      )}
       {entryMode === 'manual' && (
         <form className="meter-review-form" onSubmit={handleManualConfirm}>
           <p>
-            Enter the displayed digits exactly. The top row is stored in
-            thousandths of a litre and the TOTAL row as a whole number. Manual
-            entry does not use OCR or require internet access.
+            Enter the displayed raw digits exactly; the decimal point is
+            implied for both rows. For example, 20000 means 20.000 L and
+            120000 means 120.000 L. Manual digit entry still requires a photo
+            of the meter as supporting evidence.
           </p>
           <label>
             Fill raw digits (top row)
@@ -690,6 +668,11 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
               }}
               placeholder="e.g. 22032 = 22.032 L"
             />
+            {formatRawMeterDigitsAsLitres(manualCurrentFillDraft) != null && (
+              <small aria-live="polite">
+                Interpreted as {formatRawMeterDigitsAsLitres(manualCurrentFillDraft)} L
+              </small>
+            )}
           </label>
           <label>
             Global cumulative raw digits (TOTAL row)
@@ -707,13 +690,19 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
               }}
               placeholder="e.g. 261563 = 261.563 L"
             />
+            {formatRawMeterDigitsAsLitres(manualCumulativeTotalDraft) != null && (
+              <small aria-live="polite">
+                Interpreted as {formatRawMeterDigitsAsLitres(manualCumulativeTotalDraft)} L
+              </small>
+            )}
           </label>
           <label>
-            Optional supporting photo
+            Supporting meter photo (required)
             <input
               type="file"
               accept="image/jpeg,image/png"
               capture="environment"
+              required
               onChange={(event) => {
                 setManualEvidenceFile(event.target.files?.[0] ?? null);
                 setManualConfirmed(false);
@@ -734,9 +723,13 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             I checked the available digits against the meter. If the top row is
             missing, the app may calculate the fill from the global total.
           </label>
-          <button className="primary-button" type="submit" disabled={verifying}>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={verifying || !manualEvidenceFile}
+          >
             <AppIcon name="check" size={16} />
-            {verifying ? 'Saving manual evidence...' : 'Confirm manual readings'}
+            {verifying ? 'Uploading meter photo...' : 'Confirm manual readings'}
           </button>
           <button
             className="outline-button"
@@ -976,6 +969,11 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
                   onChange={(event) => setCurrentFillDraft(event.target.value)}
                   placeholder="e.g. 22032 = 22.032 L"
                 />
+                {formatRawMeterDigitsAsLitres(currentFillDraft) != null && (
+                  <small aria-live="polite">
+                    Interpreted as {formatRawMeterDigitsAsLitres(currentFillDraft)} L
+                  </small>
+                )}
               </label>
               <label>
                 Global cumulative raw digits (TOTAL row)
@@ -988,6 +986,11 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
                   onChange={(event) => setCumulativeTotalDraft(event.target.value)}
                   placeholder="e.g. 261563 = 261.563 L"
                 />
+                {formatRawMeterDigitsAsLitres(cumulativeTotalDraft) != null && (
+                  <small aria-live="polite">
+                    Interpreted as {formatRawMeterDigitsAsLitres(cumulativeTotalDraft)} L
+                  </small>
+                )}
               </label>
               <label className="meter-confirmation">
                 <input type="checkbox" required />
@@ -1467,7 +1470,7 @@ function FuelForm({
               <strong>
                 {currentFillReading == null
                   ? manualReadings?.currentFillRawDigits
-                    ? `${manualReadings.currentFillRawDigits} raw digits`
+                    ? formatRawMeterReading(manualReadings.currentFillRawDigits)
                     : 'Calculated after comparison'
                   : meterPhoto?.currentFillMilliLitres != null
                     ? `${formatMilliLitres(meterPhoto.currentFillMilliLitres)} litres`
@@ -1483,7 +1486,9 @@ function FuelForm({
               </span>
               <strong>
                 {cumulativeTotalReading == null
-                  ? manualReadings?.cumulativeTotalRawDigits || 'Not recorded'
+                  ? manualReadings?.cumulativeTotalRawDigits
+                    ? formatRawMeterReading(manualReadings.cumulativeTotalRawDigits)
+                    : 'Not recorded'
                   : `${formatCumulativeTotal(cumulativeTotalReading)} litres`}
               </strong>
             </div>
@@ -1771,6 +1776,11 @@ function formatMilliLitres(value) {
   const wholeLitres = Math.floor(absoluteMilliLitres / 1000);
   const fractionalDigits = String(absoluteMilliLitres % 1000).padStart(3, '0');
   return `${sign}${wholeLitres.toLocaleString('en-GB')}.${fractionalDigits}`;
+}
+
+function formatRawMeterReading(rawDigits) {
+  const litres = formatRawMeterDigitsAsLitres(rawDigits);
+  return litres == null ? `${rawDigits} raw digits` : `${litres} L (raw ${rawDigits})`;
 }
 
 function formatRecordFill(record) {
@@ -4660,6 +4670,7 @@ function AdminMeterReadingReviews() {
   const [loadingError, setLoadingError] = useState('');
   const [reviewNotes, setReviewNotes] = useState({});
   const [savingId, setSavingId] = useState(null);
+  const [savingDecision, setSavingDecision] = useState(null);
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
 
@@ -4686,6 +4697,7 @@ function AdminMeterReadingReviews() {
       return;
     }
     setSavingId(review.id);
+    setSavingDecision(decision);
     setActionError('');
     setNotice('');
     try {
@@ -4700,6 +4712,7 @@ function AdminMeterReadingReviews() {
       setActionError(error.message);
     } finally {
       setSavingId(null);
+      setSavingDecision(null);
     }
   }
 
@@ -4752,12 +4765,31 @@ function AdminMeterReadingReviews() {
         </div>
       ) : (
         <div className="admin-meter-review-list">
-          {reviews.map((review) => (
+          {reviews.map((review) => {
+            const totalChange =
+              review.cumulativeTotalInteger != null &&
+              review.previousGlobalTotalInteger != null
+                ? review.cumulativeTotalInteger - review.previousGlobalTotalInteger
+                : null;
+            const topRowDifference =
+              totalChange != null && review.topCurrentFillMilliLitres != null
+                ? review.topCurrentFillMilliLitres - totalChange
+                : null;
+            const photoUrl = review.meterPhotoId
+              ? apiUrl(`/api/meter-photos/${review.meterPhotoId}/content`)
+              : null;
+
+            return (
             <article className="admin-meter-review-card" key={review.id}>
               <header className="admin-meter-review-card-header">
                 <div>
                   <p className="eyebrow">PENDING DECISION</p>
                   <h3>Reading #{review.id}</h3>
+                  <p className="admin-meter-review-context">
+                    Submitted {formatDate(review.submittedAt)}
+                    <span aria-hidden="true">·</span>
+                    Odometer {formatMileage(review.odometerMiles)} mi
+                  </p>
                 </div>
                 <span className="admin-meter-review-source">
                   {(review.readingSource || 'unknown').toUpperCase()}
@@ -4809,6 +4841,19 @@ function AdminMeterReadingReviews() {
                       <code>{review.cumulativeTotalRawDigits || 'Missing'}</code>
                     </div>
                   </div>
+                  {totalChange != null && (
+                    <div className="admin-meter-review-comparison">
+                      <span>Change since previous accepted total</span>
+                      <strong>{formatMilliLitres(totalChange)} L</strong>
+                      {topRowDifference != null && (
+                        <small>
+                          {topRowDifference === 0
+                            ? 'Matches the top-row reading exactly.'
+                            : `Top-row difference: ${formatMilliLitres(topRowDifference)} L.`}
+                        </small>
+                      )}
+                    </div>
+                  )}
                   {review.fillCalculation === 'global_total_difference' && (
                     <p className="admin-meter-review-calculated">
                       Fill calculated from the global-total difference
@@ -4832,14 +4877,31 @@ function AdminMeterReadingReviews() {
                   </div>
                 </div>
                 <div className="admin-meter-review-decision">
-                  {review.meterPhotoId ? (
+                  {photoUrl ? (
                     <figure className="admin-meter-review-evidence">
-                      <img
-                        src={apiUrl(`/api/meter-photos/${review.meterPhotoId}/content`)}
-                        alt={`Original meter photo for reading ${review.id}`}
-                        loading="lazy"
-                      />
-                      <figcaption>Original meter photo</figcaption>
+                      <a
+                        className="admin-meter-review-evidence-link"
+                        href={photoUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`Open full-size meter photo for reading ${review.id}`}
+                      >
+                        <img
+                          src={photoUrl}
+                          alt={`Original meter photo for reading ${review.id}`}
+                          loading="lazy"
+                        />
+                      </a>
+                      <figcaption>
+                        Original meter photo
+                        <a
+                          href={photoUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open full size
+                        </a>
+                      </figcaption>
                     </figure>
                   ) : (
                     <div className="admin-meter-review-no-evidence">
@@ -4871,9 +4933,12 @@ function AdminMeterReadingReviews() {
                         savingId === review.id ||
                         !(reviewNotes[review.id] || '').trim()
                       }
+                      aria-busy={savingId === review.id && savingDecision === 'approve'}
                       onClick={() => void decide(review, 'approve')}
                     >
-                      {savingId === review.id ? 'Saving...' : 'Approve reading'}
+                      {savingId === review.id && savingDecision === 'approve'
+                        ? 'Approving...'
+                        : 'Approve reading'}
                     </button>
                     <button
                       className="outline-button"
@@ -4882,15 +4947,19 @@ function AdminMeterReadingReviews() {
                         savingId === review.id ||
                         !(reviewNotes[review.id] || '').trim()
                       }
+                      aria-busy={savingId === review.id && savingDecision === 'reject'}
                       onClick={() => void decide(review, 'reject')}
                     >
-                      Reject
+                      {savingId === review.id && savingDecision === 'reject'
+                        ? 'Rejecting...'
+                        : 'Reject'}
                     </button>
                   </div>
                 </div>
               </div>
             </article>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

@@ -2937,6 +2937,16 @@ select:focus-visible {
   margin: 0;
 }
 
+.admin-meter-review-context {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 11px;
+  gap: 7px;
+  margin: 8px 0 0;
+}
+
 .admin-meter-review-source {
   color: var(--teal);
 }
@@ -3007,6 +3017,36 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.admin-meter-review-comparison {
+  background: color-mix(in srgb, var(--teal) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--teal) 24%, var(--line));
+  border-radius: 12px;
+  display: grid;
+  gap: 5px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 13px 14px;
+}
+
+.admin-meter-review-comparison > span {
+  align-self: end;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-meter-review-comparison > strong {
+  color: var(--ink);
+  font-size: 17px;
+  text-align: right;
+}
+
+.admin-meter-review-comparison > small {
+  color: var(--muted);
+  font-size: 11px;
+  grid-column: 1 / -1;
+  line-height: 1.45;
+}
+
 .admin-meter-review-calculated {
   background: color-mix(in srgb, var(--teal) 10%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--teal) 26%, var(--line));
@@ -3062,11 +3102,39 @@ select:focus-visible {
   width: 100%;
 }
 
+.admin-meter-review-evidence-link {
+  background: #10191c;
+  cursor: zoom-in;
+  display: block;
+}
+
+.admin-meter-review-evidence-link:focus-visible,
+.admin-meter-review-evidence figcaption a:focus-visible {
+  outline: 3px solid var(--teal);
+  outline-offset: -3px;
+}
+
 .admin-meter-review-evidence figcaption {
+  align-items: center;
   border-top: 1px solid var(--line);
   color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
   font-size: 10px;
   padding: 9px 12px;
+}
+
+.admin-meter-review-evidence figcaption a {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.admin-meter-review-evidence figcaption a:hover {
+  text-decoration: underline;
 }
 
 .admin-meter-review-no-evidence {

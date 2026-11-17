@@ -25,6 +25,9 @@ from backend.app.models import (
     QrSession,
     Vehicle,
 )
+from backend.app.api.routers.fuel_records import (
+    create_fuel_record as create_fuel_record_route,
+)
 from backend.app.schemas.fuel_record import FuelRecordCreate
 from backend.app.services.auth import bootstrap_admin, create_employee
 from backend.app.services.fuel_records import (
@@ -216,6 +219,44 @@ class MeterReadingWorkflowTests(unittest.TestCase):
                 get_or_create_global_meter_state(session).current_total_integer,
                 1_022_000,
             )
+
+    def test_20000_raw_fill_reconciles_as_20_litres(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            _, employee, _ = self._create_accounts_and_vehicle(session)
+            baseline = create_fuel_record(
+                session,
+                employee,
+                self._manual_request(1000, "100000", "50"),
+            )
+            self.assertIsInstance(baseline, FuelRecord)
+            self.assertEqual(baseline.current_fill_milli_litres, 50)
+
+            next_fill = create_fuel_record(
+                session,
+                employee,
+                self._manual_request(
+                    1050, "120000", "20000", calculated_confirmed=True
+                ),
+            )
+
+            self.assertIsInstance(next_fill, FuelRecord)
+            self.assertEqual(next_fill.current_fill_milli_litres, 20_000)
+            self.assertEqual(next_fill.top_current_fill_milli_litres, 20_000)
+            self.assertEqual(next_fill.cumulative_total_integer, 120_000)
+            self.assertEqual(next_fill.meter_check_status, "matched")
+
+    def test_api_rejects_fuel_submission_without_meter_photo(self) -> None:
+        from fastapi import HTTPException
+
+        with Session(self.engine) as session, session.begin():
+            _, employee, _ = self._create_accounts_and_vehicle(session)
+            request = self._manual_request(1000, "100000", "20000")
+
+            with self.assertRaises(HTTPException) as raised:
+                create_fuel_record_route(request, session, employee)
+
+            self.assertEqual(raised.exception.status_code, 422)
+            self.assertIn("meter photo is required", raised.exception.detail)
 
     def test_over_100_calculated_fill_is_rejected_without_review(
         self,

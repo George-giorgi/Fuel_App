@@ -57,6 +57,11 @@ def create_fuel_record(
     session: Session = Depends(get_db_session),
     employee: Employee = Depends(get_current_employee),
 ) -> FuelRecordSubmissionRead:
+    if request.meter_photo_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A meter photo is required to submit a fuel record.",
+        )
     try:
         result = save_fuel_record(session, employee, request)
         if isinstance(result, MeterReadingReview):
