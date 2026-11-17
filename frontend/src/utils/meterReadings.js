@@ -23,6 +23,14 @@ export function formatRawMeterDigitsAsLitres(rawDigits) {
   return `${wholeLitres}.${milliLitres}`;
 }
 
+export function rawMeterDigitsToLitres(rawDigits) {
+  if (typeof rawDigits !== 'string' || !/^[0-9]{1,18}$/.test(rawDigits)) {
+    return null;
+  }
+
+  return formatRawMeterDigitsAsLitres(rawDigits)?.replace(/,/g, '') ?? null;
+}
+
 export function formatOcrCurrentFill(rawDigits, value) {
   if (rawDigits) {
     return formatRawMeterDigitsAsLitres(rawDigits) ?? 'Needs manual review';

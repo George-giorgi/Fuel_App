@@ -1,8 +1,19 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from backend.app.db.base import Base
-from backend.app.models import Employee, MeterPhoto
+from backend.app.models import (
+    Employee,
+    FuelRecord,
+    GlobalMeterEvent,
+    GlobalMeterState,
+    MeterPhoto,
+    MeterReadingReview,
+    QrSession,
+    Vehicle,
+    VehicleMeterEvent,
+    VehicleOdometerCorrection,
+)
 
 
 def reset_application_data(session: Session) -> list[str]:
@@ -23,4 +34,25 @@ def reset_application_data(session: Session) -> list[str]:
         else:
             session.execute(delete(table))
 
+    return photo_keys
+
+
+def clear_operational_data(session: Session) -> list[str]:
+    photo_keys = list(session.scalars(select(MeterPhoto.storage_key)).all())
+
+    for model in (
+        GlobalMeterState,
+        MeterReadingReview,
+        FuelRecord,
+        MeterPhoto,
+        QrSession,
+        GlobalMeterEvent,
+        VehicleMeterEvent,
+        VehicleOdometerCorrection,
+    ):
+        session.execute(delete(model))
+
+    session.execute(
+        update(Vehicle).values(cumulative_total_litres=None, meter_epoch=0)
+    )
     return photo_keys

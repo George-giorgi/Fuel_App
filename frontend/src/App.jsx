@@ -4,6 +4,7 @@ import companyLogo from '../../brusna-curious-cat-logo.png';
 import BossDashboard from './BossDashboard.jsx';
 import {
   apiUrl,
+  clearAdminOperationalData,
   createEmployee,
   createVehicle,
   createFuelRecord,
@@ -41,7 +42,8 @@ import {
 import {
   formatOcrCurrentFill as formatOcrCurrentFillValue,
   formatRawMeterDigitsAsLitres,
-  ocrValueToRawDigits
+  ocrValueToRawDigits,
+  rawMeterDigitsToLitres
 } from './utils/meterReadings.js';
 
 const REPORT_EMAIL = 'fleet@yourcompany.com';
@@ -2011,6 +2013,11 @@ function GlobalMeterDashboard({
 }) {
   const [savingEvent, setSavingEvent] = useState(false);
   const [eventError, setEventError] = useState('');
+  const [baselineDigits, setBaselineDigits] = useState('');
+  const hasGlobalTotal =
+    summary?.currentTotalInteger != null ||
+    summary?.currentCumulativeTotalLitres != null;
+  const baselinePreview = formatRawMeterDigitsAsLitres(baselineDigits);
   const latestPhotoUrl = summary?.lastMeterPhotoUrl;
   const recentHistory = history.slice(0, 3);
 
@@ -2018,21 +2025,174 @@ function GlobalMeterDashboard({
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const baselineCumulativeTotalLitres = rawMeterDigitsToLitres(
+      String(data.get('baselineCumulativeTotalLitres') ?? '')
+    );
+    if (baselineCumulativeTotalLitres === null) {
+      setEventError('Enter the meter digits using numbers only.');
+      return;
+    }
+
     setSavingEvent(true);
     setEventError('');
     try {
       await onRecordEvent({
         eventType: data.get('eventType'),
-        baselineCumulativeTotalLitres: data.get('baselineCumulativeTotalLitres'),
+        baselineCumulativeTotalLitres,
         notes: data.get('notes')
       });
       form.reset();
+      setBaselineDigits('');
     } catch (error) {
       setEventError(error.message);
     } finally {
       setSavingEvent(false);
     }
   }
+
+  const eventForm = (
+    <form
+      className={`global-meter-event-form${hasGlobalTotal ? '' : ' is-initial-baseline'}`}
+      onSubmit={handleEventSubmit}
+    >
+      <div className="global-meter-event-heading">
+        <span className="global-meter-event-icon" aria-hidden="true">
+          <AppIcon name="meter" size={19} />
+        </span>
+        <div className="global-meter-event-copy">
+          <p className="eyebrow">AUTHORIZED CHANGE</p>
+          <h4>
+            {hasGlobalTotal
+              ? 'Reset or replace the shared meter'
+              : 'Establish the initial global meter baseline'}
+          </h4>
+          <p>
+            {hasGlobalTotal
+              ? 'Changes the fleet-wide baseline and records the reason in the audit history.'
+              : 'Set the first verified reading for the shared meter. It will become the global cumulative total.'}
+          </p>
+        </div>
+        <span className="global-meter-event-audit">
+          <AppIcon name="check" size={13} />
+          Audit trail
+        </span>
+      </div>
+      <fieldset className="global-meter-event-types">
+        <legend>Change type</legend>
+        {hasGlobalTotal ? (
+          <>
+            <label className="global-meter-event-type-option">
+              <input
+                type="radio"
+                name="eventType"
+                value="reset"
+                defaultChecked
+                required
+              />
+              <span className="global-meter-event-type-icon" aria-hidden="true">
+                <AppIcon name="meter" size={17} />
+              </span>
+              <span className="global-meter-event-type-copy">
+                <strong>Meter reset</strong>
+                <small>The existing counter has reset</small>
+              </span>
+              <span className="global-meter-event-type-check" aria-hidden="true">
+                <AppIcon name="check" size={13} />
+              </span>
+            </label>
+            <label className="global-meter-event-type-option">
+              <input
+                type="radio"
+                name="eventType"
+                value="replacement"
+              />
+              <span className="global-meter-event-type-icon" aria-hidden="true">
+                <AppIcon name="vehicle" size={17} />
+              </span>
+              <span className="global-meter-event-type-copy">
+                <strong>Meter replacement</strong>
+                <small>A new shared meter has been installed</small>
+              </span>
+              <span className="global-meter-event-type-check" aria-hidden="true">
+                <AppIcon name="check" size={13} />
+              </span>
+            </label>
+          </>
+        ) : (
+          <label className="global-meter-event-type-option">
+            <input
+              type="radio"
+              name="eventType"
+              value="baseline"
+              defaultChecked
+              required
+            />
+            <span className="global-meter-event-type-icon" aria-hidden="true">
+              <AppIcon name="meter" size={17} />
+            </span>
+            <span className="global-meter-event-type-copy">
+              <strong>Initial baseline</strong>
+              <small>This first reading becomes the shared total</small>
+            </span>
+            <span className="global-meter-event-type-check" aria-hidden="true">
+              <AppIcon name="check" size={13} />
+            </span>
+          </label>
+        )}
+      </fieldset>
+      <label className="global-meter-event-total-field">
+        New cumulative total (meter digits)
+        <input
+          name="baselineCumulativeTotalLitres"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]{1,18}"
+          maxLength={18}
+          placeholder="e.g. 200000"
+          value={baselineDigits}
+          onChange={(event) => setBaselineDigits(event.target.value)}
+          aria-describedby="globalMeterDigitsHelp"
+          required
+        />
+        <small id="globalMeterDigitsHelp">
+          Enter the displayed digits without a decimal point. 200000 = 200.000 L.
+        </small>
+        {baselineDigits && (
+          <output className="global-meter-event-total-preview" aria-live="polite">
+            {baselinePreview
+              ? `Reading preview: ${baselinePreview} L`
+              : 'Use digits only for this meter reading.'}
+          </output>
+        )}
+      </label>
+      <label className="global-meter-event-notes-field">
+        Reason for change
+        <input
+          name="notes"
+          minLength="5"
+          maxLength="500"
+          placeholder={
+            hasGlobalTotal
+              ? 'Explain why the meter is changing'
+              : 'e.g. Initial reading at commissioning'
+          }
+          required
+        />
+      </label>
+      {eventError && <p className="auth-error" role="alert">{eventError}</p>}
+      <button
+        className="primary-button"
+        type="submit"
+        disabled={savingEvent || loading || !summary}
+      >
+        {savingEvent
+          ? 'Saving change...'
+          : hasGlobalTotal
+            ? 'Save meter change'
+            : 'Set global meter baseline'}
+      </button>
+    </form>
+  );
 
   return (
     <section className="global-meter-panel" id="globalMeter">
@@ -2057,7 +2217,11 @@ function GlobalMeterDashboard({
             <span>L</span>
           </strong>
           <small>
-            {summary?.lastUpdateSource === 'fill'
+            {!hasGlobalTotal
+              ? loading
+                ? 'Loading shared meter status'
+                : 'Initial baseline required to start fleet tracking'
+              : summary?.lastUpdateSource === 'fill'
               ? 'Latest accepted cumulative meter reading'
               : summary?.lastUpdateSource === 'baseline'
                 ? 'Administrator-verified starting baseline'
@@ -2125,6 +2289,17 @@ function GlobalMeterDashboard({
           </figcaption>
         </figure>
       </div>
+
+      {!hasGlobalTotal && (
+        <div className="global-meter-baseline-notice" role="status">
+          <strong>Setup required</strong>
+          <span>
+            Record the first verified meter reading to start the shared fleet
+            total. This establishes a starting point; it does not record a fuel fill.
+          </span>
+        </div>
+      )}
+      {!hasGlobalTotal && eventForm}
 
       {showNctAlerts && <NctAlertsCard onOpen={onOpenNct} />}
 
@@ -2274,89 +2449,7 @@ function GlobalMeterDashboard({
         )}
       </div>
 
-      <form className="global-meter-event-form" onSubmit={handleEventSubmit}>
-        <div className="global-meter-event-heading">
-          <span className="global-meter-event-icon" aria-hidden="true">
-            <AppIcon name="meter" size={19} />
-          </span>
-          <div className="global-meter-event-copy">
-            <p className="eyebrow">AUTHORIZED CHANGE</p>
-            <h4>Set, reset, or replace the shared meter</h4>
-            <p>
-              Changes the fleet-wide baseline and records the reason in the audit
-              history.
-            </p>
-          </div>
-          <span className="global-meter-event-audit">
-            <AppIcon name="check" size={13} />
-            Audit logged
-          </span>
-        </div>
-        <fieldset className="global-meter-event-types">
-          <legend>Change type</legend>
-          <label className="global-meter-event-type-option">
-            <input
-              type="radio"
-              name="eventType"
-              value="reset"
-              defaultChecked
-              required
-            />
-            <span className="global-meter-event-type-icon" aria-hidden="true">
-              <AppIcon name="meter" size={17} />
-            </span>
-            <span className="global-meter-event-type-copy">
-              <strong>Meter reset</strong>
-              <small>The existing counter has reset</small>
-            </span>
-            <span className="global-meter-event-type-check" aria-hidden="true">
-              <AppIcon name="check" size={13} />
-            </span>
-          </label>
-          <label className="global-meter-event-type-option">
-            <input
-              type="radio"
-              name="eventType"
-              value="replacement"
-            />
-            <span className="global-meter-event-type-icon" aria-hidden="true">
-              <AppIcon name="vehicle" size={17} />
-            </span>
-            <span className="global-meter-event-type-copy">
-              <strong>Meter replacement</strong>
-              <small>A new shared meter has been installed</small>
-            </span>
-            <span className="global-meter-event-type-check" aria-hidden="true">
-              <AppIcon name="check" size={13} />
-            </span>
-          </label>
-        </fieldset>
-        <label>
-          New cumulative total (L)
-          <input
-            name="baselineCumulativeTotalLitres"
-            type="number"
-            min="0"
-            step="1"
-            placeholder="e.g. 125000"
-            required
-          />
-        </label>
-        <label className="global-meter-event-notes-field">
-          Reason for change
-          <input
-            name="notes"
-            minLength="5"
-            maxLength="500"
-            placeholder="Explain why the meter is changing"
-            required
-          />
-        </label>
-        {eventError && <p className="auth-error" role="alert">{eventError}</p>}
-        <button className="primary-button" type="submit" disabled={savingEvent}>
-          {savingEvent ? 'Saving change...' : 'Save meter change'}
-        </button>
-      </form>
+      {hasGlobalTotal && eventForm}
     </section>
   );
 }
@@ -3968,6 +4061,10 @@ function AdminSummaryTab({
   const [summaryRefreshing, setSummaryRefreshing] = useState(false);
   const [summaryError, setSummaryError] = useState('');
   const [summaryLastUpdated, setSummaryLastUpdated] = useState(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupConfirmation, setCleanupConfirmation] = useState('');
+  const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [cleanupError, setCleanupError] = useState('');
   const summaryRangeRef = useRef(initialRange);
   const summaryRequestIdRef = useRef(0);
 
@@ -4036,6 +4133,21 @@ function AdminSummaryTab({
     setStartDate('');
     setEndDate('');
     void loadSummary({ startDate: '', endDate: '' });
+  }
+
+  async function handleOperationalDataClear(event) {
+    event.preventDefault();
+    if (cleanupConfirmation !== 'CLEAR OPERATIONAL DATA') return;
+
+    setCleanupLoading(true);
+    setCleanupError('');
+    try {
+      await clearAdminOperationalData(cleanupConfirmation);
+      window.location.reload();
+    } catch (error) {
+      setCleanupError(error.message);
+      setCleanupLoading(false);
+    }
   }
 
   const selectedPeriod =
@@ -4277,6 +4389,71 @@ function AdminSummaryTab({
             </section>
           </>
         ) : null}
+      </section>
+      <section
+        className="admin-data-cleanup"
+        aria-labelledby="adminDataCleanupTitle"
+      >
+        <div>
+          <p className="eyebrow">DANGER ZONE</p>
+          <h3 id="adminDataCleanupTitle">Clear operational data</h3>
+          <p>
+            Permanently remove all fuel entries, mileage history, meter
+            readings, reviews, corrections, and meter photos. All user accounts
+            and vehicles will be kept.
+          </p>
+        </div>
+        {!cleanupOpen ? (
+          <button
+            className="danger-button"
+            type="button"
+            onClick={() => setCleanupOpen(true)}
+          >
+            Clean operational data
+          </button>
+        ) : (
+          <form onSubmit={handleOperationalDataClear}>
+            <label htmlFor="adminDataCleanupConfirmation">
+              To confirm, type <strong>CLEAR OPERATIONAL DATA</strong>
+              <input
+                id="adminDataCleanupConfirmation"
+                autoComplete="off"
+                value={cleanupConfirmation}
+                onChange={(event) =>
+                  setCleanupConfirmation(event.target.value)
+                }
+                disabled={cleanupLoading}
+              />
+            </label>
+            <div className="admin-data-cleanup-actions">
+              <button
+                className="danger-button"
+                type="submit"
+                disabled={
+                  cleanupLoading ||
+                  cleanupConfirmation !== 'CLEAR OPERATIONAL DATA'
+                }
+              >
+                {cleanupLoading ? 'Cleaning data...' : 'Permanently clear data'}
+              </button>
+              <button
+                className="outline-button"
+                type="button"
+                disabled={cleanupLoading}
+                onClick={() => {
+                  setCleanupOpen(false);
+                  setCleanupConfirmation('');
+                  setCleanupError('');
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            {cleanupError && (
+              <p className="auth-error" role="alert">{cleanupError}</p>
+            )}
+          </form>
+        )}
       </section>
     </div>
   );
@@ -5533,7 +5710,11 @@ export default function App() {
   async function handleGlobalMeterEventCreated(eventData) {
     await createGlobalMeterEvent(eventData);
     await loadWorkspaceData(employee);
-    setToast('Global meter reset/replacement recorded.');
+    setToast(
+      eventData.eventType === 'baseline'
+        ? 'Initial global meter baseline set.'
+        : 'Global meter reset/replacement recorded.'
+    );
   }
 
   function exportAll(recordsToExport = records) {

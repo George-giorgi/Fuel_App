@@ -1,19 +1,23 @@
 from datetime import date
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.app.api.dependencies import require_admin, require_management
 from backend.app.db.session import get_db_session
-from backend.app.models import Employee, FuelRecord
+from backend.app.models import Employee, FuelRecord, Vehicle
 from backend.app.repositories.fuel_records import get_latest_vehicle_odometer
 from backend.app.repositories.vehicles import get_vehicle_by_id
 from backend.app.schemas import FuelRecordRead
 from backend.app.schemas.admin_dashboard import (
     AdminEmployeeRead,
     AdminFuelSummaryRead,
+    AdminOperationalDataClearRead,
+    AdminOperationalDataClearRequest,
 )
 from backend.app.schemas.employee import (
     AdminEmployeeCreatedRead,
@@ -28,6 +32,7 @@ from backend.app.schemas.odometer_correction import (
 )
 from backend.app.schemas.vehicle import VehicleCreate, VehicleQrRead, VehicleRead
 from backend.app.services.auth import create_employee
+from backend.app.services.application_reset import clear_operational_data
 from backend.app.services.admin_dashboard import (
     AdminEmployeeNotFound,
     InvalidAdminDateRange,
@@ -49,8 +54,10 @@ from backend.app.services.nct import (
     list_vehicle_nct,
     update_vehicle_nct,
 )
+from backend.app.services.photo_storage import PhotoStorageError, delete_photo
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["administration"])
 
 
@@ -133,6 +140,34 @@ def admin_fuel_summary(
     except InvalidAdminDateRange as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return AdminFuelSummaryRead.model_validate(summary)
+
+
+@router.post(
+    "/operational-data/clear",
+    response_model=AdminOperationalDataClearRead,
+)
+def clear_admin_operational_data(
+    request: AdminOperationalDataClearRequest,
+    session: Annotated[Session, Depends(get_db_session)],
+    _: Annotated[Employee, Depends(require_admin)],
+) -> AdminOperationalDataClearRead:
+    photo_keys = clear_operational_data(session)
+    try:
+        for storage_key in photo_keys:
+            delete_photo(storage_key)
+    except PhotoStorageError as error:
+        logger.exception("Could not remove a meter photo during data cleanup.")
+        raise HTTPException(
+            status_code=503,
+            detail="Could not delete all stored meter photos. No database records were cleared; retry the cleanup.",
+        ) from error
+
+    return AdminOperationalDataClearRead(
+        message="Operational records cleared. All users and vehicles were retained.",
+        deleted_meter_photos=len(photo_keys),
+        retained_users=session.scalar(select(func.count()).select_from(Employee)) or 0,
+        retained_vehicles=session.scalar(select(func.count()).select_from(Vehicle)) or 0,
+    )
 
 
 @router.post(

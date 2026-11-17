@@ -1,6 +1,7 @@
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.app.schemas.auth import EmployeeRead
 from backend.app.schemas.fuel_record import to_camel_case
@@ -57,3 +58,18 @@ class AdminFuelSummaryRead(BaseModel):
     cost_record_count: int
     top_vehicles: list[AdminTopVehicleRead]
     recent_records: list[AdminRecentFuelRecordRead]
+
+
+class AdminOperationalDataClearRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confirmation: Literal["CLEAR OPERATIONAL DATA"]
+
+
+class AdminOperationalDataClearRead(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel_case, populate_by_name=True)
+
+    message: str
+    deleted_meter_photos: int = Field(ge=0)
+    retained_users: int = Field(ge=0)
+    retained_vehicles: int = Field(ge=0)

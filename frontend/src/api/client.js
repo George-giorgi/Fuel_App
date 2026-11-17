@@ -189,6 +189,13 @@ export function getAdminEmployees() {
   return apiRequest('/api/admin/employees');
 }
 
+export function clearAdminOperationalData(confirmation) {
+  return apiRequest('/api/admin/operational-data/clear', {
+    method: 'POST',
+    body: JSON.stringify({ confirmation })
+  });
+}
+
 export function getAdminEmployeeFuelRecords(employeeId, dateRange = {}) {
   const query = new URLSearchParams();
   if (dateRange.startDate) query.set('start_date', dateRange.startDate);

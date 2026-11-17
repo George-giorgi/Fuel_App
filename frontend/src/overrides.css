@@ -4423,6 +4423,29 @@ footer {
   font-size: 12px;
 }
 
+.global-meter-baseline-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px 12px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--teal) 35%, var(--line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--teal) 7%, var(--surface));
+}
+
+.global-meter-baseline-notice strong {
+  color: var(--teal);
+  font-size: 11px;
+}
+
+.global-meter-baseline-notice span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .global-meter-event-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
@@ -4435,6 +4458,12 @@ footer {
   background:
     radial-gradient(ellipse at 100% 0%, color-mix(in srgb, var(--teal) 7%, transparent), transparent 42%),
     var(--surface-muted);
+}
+
+.global-meter-event-form.is-initial-baseline {
+  margin-top: 12px;
+  border-color: color-mix(in srgb, var(--teal) 45%, var(--line));
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--teal) 8%, transparent);
 }
 
 .global-meter-event-heading {
@@ -4632,6 +4661,29 @@ footer {
   opacity: 0.78;
 }
 
+.global-meter-event-total-field > small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.global-meter-event-total-field,
+.global-meter-event-notes-field,
+.global-meter-event-form .primary-button {
+  grid-column: 1 / -1;
+}
+
+.global-meter-event-total-preview {
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--teal) 8%, var(--surface));
+  color: var(--teal);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .global-meter-event-form .primary-button {
   min-height: 42px;
   padding: 0 15px;
@@ -4653,6 +4705,16 @@ footer {
     radial-gradient(ellipse at 100% 0%, #54b98715, transparent 44%),
     linear-gradient(145deg, #18241c, #131b16);
   box-shadow: inset 0 1px 0 #ffffff08;
+}
+
+:root[data-theme='dark'] .global-meter-baseline-notice {
+  border-color: #35654a;
+  background: #1c3325;
+}
+
+:root[data-theme='dark'] .global-meter-event-total-preview {
+  background: #203328;
+  color: #a0e2b9;
 }
 
 :root[data-theme='dark'] .global-meter-event-heading {
@@ -7480,6 +7542,99 @@ footer {
   display: grid;
   align-content: start;
   gap: 14px;
+}
+
+.admin-data-cleanup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #e6b3ad;
+  border-radius: 14px;
+  background: #fff8f7;
+}
+
+.admin-data-cleanup h3 {
+  margin: 3px 0 6px;
+  color: #8d2923;
+  font-size: 17px;
+}
+
+.admin-data-cleanup > div > p:last-child {
+  max-width: 70ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-data-cleanup form {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+}
+
+.admin-data-cleanup form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.admin-data-cleanup form label strong {
+  color: #8d2923;
+}
+
+.admin-data-cleanup input {
+  width: min(100%, 380px);
+  min-height: 42px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.admin-data-cleanup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.danger-button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #a1322b;
+  border-radius: 8px;
+  background: #a1322b;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.danger-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+:root[data-theme='dark'] .admin-data-cleanup {
+  border-color: #70413d;
+  background: #261b1a;
+}
+
+:root[data-theme='dark'] .admin-data-cleanup h3,
+:root[data-theme='dark'] .admin-data-cleanup form label strong {
+  color: #ffaaa1;
+}
+
+@media (max-width: 700px) {
+  .admin-data-cleanup {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .admin-summary-tab > .global-meter-panel,

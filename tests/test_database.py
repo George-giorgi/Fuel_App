@@ -149,7 +149,10 @@ from backend.app.services.admin_dashboard import (
     list_admin_employees,
     list_employee_fuel_records,
 )
-from backend.app.services.application_reset import reset_application_data
+from backend.app.services.application_reset import (
+    clear_operational_data,
+    reset_application_data,
+)
 from backend.app.services.vehicles import (
     create_vehicle,
     identify_vehicle,
@@ -268,6 +271,157 @@ class DatabaseTests(unittest.TestCase):
             employees = list(session.scalars(select(Employee)))
 
         self.assertEqual(len(employees), 1)
+
+    def test_operational_data_clear_preserves_users_and_vehicles(self) -> None:
+        now = datetime.now(timezone.utc)
+        with Session(self.engine) as session, session.begin():
+            admin = bootstrap_admin(
+                session, "admin@example.com", "Admin", "admin-password-123"
+            )
+            employee = create_employee(
+                session, "employee@example.com", "Employee", "employee-password-123"
+            )
+            vehicle = create_vehicle(session, "AB12 CDE")
+            vehicle.cumulative_total_litres = 1250
+            vehicle.meter_epoch = 2
+            employee.vehicles.append(vehicle)
+            session.flush()
+
+            qr_session = QrSession(
+                token_hash="a" * 64,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                created_at=now,
+                expires_at=now + timedelta(hours=1),
+            )
+            session.add(qr_session)
+            session.flush()
+            photo = MeterPhoto(
+                qr_session_id=qr_session.id,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                storage_key="meter-photo-clear-test.jpg",
+                content_type="image/jpeg",
+                size_bytes=1,
+                sha256="b" * 64,
+                uploaded_at=now,
+            )
+            session.add(photo)
+            correction = VehicleOdometerCorrection(
+                vehicle_id=vehicle.id,
+                authorized_by_employee_id=admin.id,
+                authorized_odometer_miles=1200,
+                previous_odometer_miles=1000,
+                notes="Cleanup test",
+                created_at=now,
+            )
+            session.add(correction)
+            session.flush()
+            record = FuelRecord(
+                reg_number=vehicle.registration_number,
+                fuel_type="Diesel",
+                first_name="Employee",
+                surname="Test",
+                mileage_miles=1100,
+                capacity=60,
+                litres=20,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                meter_photo_id=photo.id,
+                odometer_correction_id=correction.id,
+            )
+            global_event = GlobalMeterEvent(
+                event_type="baseline",
+                baseline_cumulative_total_litres=1250,
+                authorized_by_employee_id=admin.id,
+                occurred_at=now,
+                notes="Cleanup test",
+            )
+            session.add_all((record, global_event))
+            session.flush()
+            session.add_all(
+                (
+                    GlobalMeterState(
+                        id=1,
+                        current_cumulative_total_litres=1250,
+                        last_transaction_id=record.id,
+                        last_employee_id=employee.id,
+                        last_vehicle_id=vehicle.id,
+                        last_event_id=global_event.id,
+                    ),
+                    VehicleMeterEvent(
+                        vehicle_id=vehicle.id,
+                        created_by_employee_id=employee.id,
+                        meter_epoch=2,
+                        event_type="reset",
+                        baseline_cumulative_total_litres=1250,
+                        occurred_at=now,
+                        notes="Cleanup test",
+                    ),
+                    MeterReadingReview(
+                        employee_id=employee.id,
+                        vehicle_id=vehicle.id,
+                        meter_photo_id=photo.id,
+                        odometer_correction_id=correction.id,
+                        odometer_miles=1100,
+                        reading_source="photo",
+                        warnings=[],
+                        global_meter_revision=1,
+                        submitted_at=now,
+                        fuel_record_id=record.id,
+                        global_meter_event_id=global_event.id,
+                    ),
+                    EmployeeSession(
+                        employee_id=employee.id,
+                        token_hash="c" * 64,
+                        created_at=now,
+                        expires_at=now + timedelta(days=1),
+                    ),
+                )
+            )
+            session.flush()
+
+            photo_keys = clear_operational_data(session)
+
+            self.assertEqual(photo_keys, ["meter-photo-clear-test.jpg"])
+
+        with Session(self.engine) as session:
+            self.assertEqual(
+                session.scalar(select(func.count()).select_from(Employee)), 2
+            )
+            self.assertEqual(
+                session.scalar(select(func.count()).select_from(Vehicle)), 1
+            )
+            self.assertEqual(
+                session.scalar(select(func.count()).select_from(EmployeeSession)), 1
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count()).select_from(
+                        Base.metadata.tables["employee_vehicles"]
+                    )
+                ),
+                1,
+            )
+            vehicle = session.scalar(select(Vehicle))
+            self.assertIsNotNone(vehicle)
+            self.assertIsNone(vehicle.cumulative_total_litres)
+            self.assertEqual(vehicle.meter_epoch, 0)
+            for model in (
+                FuelRecord,
+                GlobalMeterEvent,
+                GlobalMeterState,
+                MeterPhoto,
+                MeterReadingReview,
+                QrSession,
+                VehicleMeterEvent,
+                VehicleOdometerCorrection,
+            ):
+                self.assertEqual(
+                    session.scalar(select(func.count()).select_from(model)),
+                    0,
+                    model.__tablename__,
+                )
 
     def test_production_reset_command_refuses_non_production_environment(self) -> None:
         with patch.dict(os.environ, {"FUEL_ENV": "development"}, clear=True):
@@ -2079,6 +2233,26 @@ class DatabaseTests(unittest.TestCase):
             persisted_event = session.get(GlobalMeterEvent, event_id)
         self.assertIsNotNone(persisted_event)
 
+    def test_initial_global_meter_baseline_updates_shared_total(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            admin = bootstrap_admin(
+                session, "admin@example.com", "Admin", "admin-password-123"
+            )
+            event = create_global_meter_event(
+                session,
+                admin,
+                "baseline",
+                Decimal("200.000"),
+                "Initial shared meter reading.",
+            )
+            summary = get_global_meter_summary(session)
+
+            self.assertEqual(event.baseline_total_integer, 200_000)
+            self.assertEqual(summary["current_total_integer"], 200_000)
+            self.assertEqual(
+                summary["current_cumulative_total_litres"], 200.0
+            )
+
     def test_management_dependency_forbids_employees_and_allows_boss(self) -> None:
         employee = Employee(role="employee")
         boss = Employee(role="boss")
@@ -3494,6 +3668,26 @@ class DatabaseTests(unittest.TestCase):
                             )
                         )
                         self.assertEqual(invalid_date_status, 422)
+
+                        app.dependency_overrides[get_current_employee] = lambda: admin
+                        invalid_cleanup_status, _ = asyncio.run(
+                            call_api(
+                                "/api/admin/operational-data/clear",
+                                "POST",
+                                {"confirmation": "CLEAR DATA"},
+                            )
+                        )
+                        self.assertEqual(invalid_cleanup_status, 422)
+                        cleanup_status, cleanup_result = asyncio.run(
+                            call_api(
+                                "/api/admin/operational-data/clear",
+                                "POST",
+                                {"confirmation": "CLEAR OPERATIONAL DATA"},
+                            )
+                        )
+                        self.assertEqual(cleanup_status, 200)
+                        self.assertEqual(cleanup_result["retainedUsers"], 1)
+                        self.assertEqual(cleanup_result["retainedVehicles"], 1)
             finally:
                 app.dependency_overrides.clear()
                 app.dependency_overrides.update(original_overrides)

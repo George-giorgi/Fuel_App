@@ -600,3 +600,15 @@ Pause app activity before running it to avoid concurrent writes. The reset is
 irreversible; take a database backup first if you may need the data later. R2
 photos are deleted before database rows, so if photo or database deletion
 fails, retry the command after reviewing its output.
+
+## Admin dashboard operational-data cleanup
+
+The Admin Summary dashboard also has a **Clear operational data** action for
+restarting records while keeping all user accounts and vehicle profiles. The
+admin must type `CLEAR OPERATIONAL DATA` before submitting. It permanently
+deletes fuel records, mileage history, meter readings and events, reviews,
+odometer corrections, QR sessions, and tracked meter photos. Vehicle cumulative
+meter baselines and epochs are reset; vehicle registrations, profile details,
+user accounts, login sessions, and user-to-vehicle assignments remain. This
+action cannot be undone and should only be used after confirming that the
+operational history is no longer needed.
