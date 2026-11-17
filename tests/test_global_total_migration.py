@@ -6,15 +6,56 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import (
+    Column,
+    ForeignKey,
+    Integer,
+    MetaData,
+    Table,
+    create_engine,
+    inspect,
+    text,
+)
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateTable
 
 
 global_total_migration = importlib.import_module(
     "backend.migrations.versions.0018_global_total_millilitres"
 )
+fill_evidence_migration = importlib.import_module(
+    "backend.migrations.versions.0017_global_fill_source_and_top_evidence"
+)
 
 
 class GlobalTotalMigrationTests(unittest.TestCase):
+    def test_meter_event_foreign_key_name_compiles_for_postgresql(self) -> None:
+        metadata = MetaData()
+        Table(
+            "global_meter_events",
+            metadata,
+            Column("id", Integer, primary_key=True),
+        )
+        table = Table(
+            "meter_reading_reviews",
+            metadata,
+            Column(
+                "global_meter_event_id",
+                Integer,
+                ForeignKey(
+                    "global_meter_events.id",
+                    name=fill_evidence_migration.GLOBAL_METER_EVENT_FK_NAME,
+                ),
+            ),
+        )
+
+        statement = str(CreateTable(table).compile(dialect=postgresql.dialect()))
+
+        self.assertIn(
+            fill_evidence_migration.GLOBAL_METER_EVENT_FK_NAME,
+            statement,
+        )
+
     def test_revision_ids_fit_alembic_version_column(self) -> None:
         config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
         script_directory = ScriptDirectory.from_config(Config(str(config_path)))

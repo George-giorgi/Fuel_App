@@ -15,6 +15,8 @@ down_revision: Union[str, None] = "0016_meter_reviews"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+GLOBAL_METER_EVENT_FK_NAME = "fk_meter_review_global_event"
+
 
 def upgrade() -> None:
     additions = {
@@ -46,7 +48,7 @@ def upgrade() -> None:
                         [
                             sa.ForeignKey(
                                 "global_meter_events.id",
-                                name="fk_meter_reading_reviews_global_meter_event_id_global_meter_events",
+                                name=GLOBAL_METER_EVENT_FK_NAME,
                                 ondelete="RESTRICT",
                             )
                         ]
