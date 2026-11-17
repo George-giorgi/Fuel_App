@@ -1,8 +1,11 @@
 import importlib
+from pathlib import Path
 import unittest
 
+from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 
 
@@ -12,6 +15,14 @@ global_total_migration = importlib.import_module(
 
 
 class GlobalTotalMigrationTests(unittest.TestCase):
+    def test_revision_ids_fit_alembic_version_column(self) -> None:
+        config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
+        script_directory = ScriptDirectory.from_config(Config(str(config_path)))
+
+        for migration in script_directory.walk_revisions():
+            with self.subTest(revision=migration.revision):
+                self.assertLessEqual(len(migration.revision), 32)
+
     def test_upgrade_scales_litre_compatibility_fields_and_preserves_digits(self) -> None:
         engine = create_engine("sqlite://")
         try:
