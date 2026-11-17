@@ -403,7 +403,7 @@ def _recognize_row(
                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY_INV,
                 block_size,
-                2,
+                3,
             )
             if mask_right_fraction is not None:
                 mask[:, round(mask.shape[1] * mask_right_fraction) :] = 0

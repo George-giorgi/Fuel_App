@@ -1235,21 +1235,28 @@ def _apply_piusi_evidence(
         total.raw_digits is not None
         and total.raw_digits == result.cumulative_total_raw_digits
     )
-    current_value = _whole_number_from_digits(
-        current.raw_digits
-        if current_digits_match
-        else result.current_fill_raw_digits
+    current_digits = (
+        result.current_fill_raw_digits
+        if current.raw_digits is None
+        else (
+            current.raw_digits
+            if (current.confidence or 0) >= 0.65
+            or current.raw_digits == result.current_fill_raw_digits
+            else None
+        )
     )
-    total_milli_litres = _whole_number_from_digits(
-        total.raw_digits
-        if total_digits_match
-        else result.cumulative_total_raw_digits
+    total_digits = (
+        result.cumulative_total_raw_digits
+        if total.raw_digits is None
+        else (
+            total.raw_digits
+            if (total.confidence or 0) >= 0.65
+            or total.raw_digits == result.cumulative_total_raw_digits
+            else None
+        )
     )
-    total_value = (
-        total_milli_litres / 1000
-        if total_milli_litres is not None
-        else None
-    )
+    current_value = _whole_number_from_digits(current_digits)
+    total_value = _cumulative_total_litres_from_digits(total_digits)
     if not current_digits_match or not total_digits_match:
         if not current_digits_match:
             warnings.append("The current-fill digits need manual review.")

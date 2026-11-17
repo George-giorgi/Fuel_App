@@ -224,11 +224,10 @@ class PiusiOcrTests(unittest.TestCase):
 
     def test_vision_segment_disagreement_requires_manual_review(self) -> None:
         lcd = recognize_piusi_lcd(REFERENCE.read_bytes())
-        conflicting = MeterOcrResult(
-            **{
-                **_candidate_ocr_result().__dict__,
-                "cumulative_total_raw_digits": "261564",
-            }
+        conflicting = replace(
+            _candidate_ocr_result(),
+            cumulative_total_litres=92.951,
+            cumulative_total_raw_digits="92951",
         )
 
         result = _apply_piusi_evidence(conflicting, lcd, "google_vision")
@@ -237,6 +236,8 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertTrue(
             any("disagree" in warning for warning in result.warnings)
         )
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertEqual(result.cumulative_total_litres, 261.563)
 
     def test_text_and_document_detection_disagreement_is_detected(self) -> None:
         response = {
