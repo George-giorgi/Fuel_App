@@ -22,3 +22,19 @@ export function formatRawMeterDigitsAsLitres(rawDigits) {
   const milliLitres = paddedDigits.slice(-3);
   return `${wholeLitres}.${milliLitres}`;
 }
+
+export function formatOcrCurrentFill(rawDigits, value) {
+  if (rawDigits) {
+    return formatRawMeterDigitsAsLitres(rawDigits) ?? 'Needs manual review';
+  }
+  if (value == null) return 'Not recorded';
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue) || numericValue < 0) {
+    return 'Needs manual review';
+  }
+  if (Number.isInteger(numericValue)) {
+    return formatRawMeterDigitsAsLitres(String(numericValue)) ?? 'Needs manual review';
+  }
+  return numericValue.toLocaleString('en-GB', { maximumFractionDigits: 3 });
+}

@@ -3200,6 +3200,17 @@ select:focus-visible {
   opacity: 0.52;
 }
 
+.admin-meter-review-action-error {
+  background: color-mix(in srgb, var(--red, #b42318) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--red, #b42318) 30%, var(--line));
+  border-radius: 10px;
+  color: var(--red, #b42318);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 10px 12px;
+}
+
 .admin-meter-review-state,
 .admin-meter-review-empty {
   align-items: center;

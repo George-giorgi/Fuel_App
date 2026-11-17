@@ -39,6 +39,7 @@ import {
   formatMileage
 } from './utils/distance.js';
 import {
+  formatOcrCurrentFill as formatOcrCurrentFillValue,
   formatRawMeterDigitsAsLitres,
   ocrValueToRawDigits
 } from './utils/meterReadings.js';
@@ -1798,14 +1799,13 @@ function formatCumulativeTotal(value) {
 }
 
 function formatOcrCurrentFill(photo) {
-  if (photo.ocrCurrentFillRawDigits) {
-    return `${formatMilliLitres(Number(photo.ocrCurrentFillRawDigits))} litres`;
-  }
-  if (photo.ocrCurrentFillLitres == null) return 'Not recorded';
-  if (!Number.isInteger(photo.ocrCurrentFillLitres)) {
-    return 'Needs manual review';
-  }
-  return `${formatCurrentFill(photo.ocrCurrentFillLitres)} litres`;
+  const fill = formatOcrCurrentFillValue(
+    photo.ocrCurrentFillRawDigits,
+    photo.ocrCurrentFillLitres
+  );
+  return fill === 'Not recorded' || fill === 'Needs manual review'
+    ? fill
+    : `${fill} litres`;
 }
 
 function formatOcrCumulativeTotal(photo) {
@@ -4672,6 +4672,7 @@ function AdminMeterReadingReviews() {
   const [savingId, setSavingId] = useState(null);
   const [savingDecision, setSavingDecision] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [actionErrorReviewId, setActionErrorReviewId] = useState(null);
   const [notice, setNotice] = useState('');
 
   async function loadReviews() {
@@ -4693,11 +4694,13 @@ function AdminMeterReadingReviews() {
   async function decide(review, decision) {
     const note = (reviewNotes[review.id] || '').trim();
     if (!note) {
+      setActionErrorReviewId(review.id);
       setActionError('Add a review note before approving or rejecting.');
       return;
     }
     setSavingId(review.id);
     setSavingDecision(decision);
+    setActionErrorReviewId(null);
     setActionError('');
     setNotice('');
     try {
@@ -4709,6 +4712,7 @@ function AdminMeterReadingReviews() {
       );
       await loadReviews();
     } catch (error) {
+      setActionErrorReviewId(review.id);
       setActionError(error.message);
     } finally {
       setSavingId(null);
@@ -4739,7 +4743,6 @@ function AdminMeterReadingReviews() {
           </button>
         </div>
       </header>
-      {actionError && <p className="auth-error" role="alert">{actionError}</p>}
       {notice && <p className="notice" role="status">{notice}</p>}
       {loading ? (
         <div className="admin-meter-review-state" role="status">
@@ -4916,10 +4919,16 @@ function AdminMeterReadingReviews() {
                       required
                       value={reviewNotes[review.id] || ''}
                       onChange={(event) =>
-                        setReviewNotes((current) => ({
-                          ...current,
-                          [review.id]: event.target.value
-                        }))
+                        {
+                          setReviewNotes((current) => ({
+                            ...current,
+                            [review.id]: event.target.value
+                          }));
+                          if (actionErrorReviewId === review.id) {
+                            setActionError('');
+                            setActionErrorReviewId(null);
+                          }
+                        }
                       }
                       placeholder="Explain what you checked and why you are approving or rejecting."
                     />
@@ -4929,10 +4938,7 @@ function AdminMeterReadingReviews() {
                     <button
                       className="primary-button"
                       type="button"
-                      disabled={
-                        savingId === review.id ||
-                        !(reviewNotes[review.id] || '').trim()
-                      }
+                      disabled={savingId === review.id}
                       aria-busy={savingId === review.id && savingDecision === 'approve'}
                       onClick={() => void decide(review, 'approve')}
                     >
@@ -4943,10 +4949,7 @@ function AdminMeterReadingReviews() {
                     <button
                       className="outline-button"
                       type="button"
-                      disabled={
-                        savingId === review.id ||
-                        !(reviewNotes[review.id] || '').trim()
-                      }
+                      disabled={savingId === review.id}
                       aria-busy={savingId === review.id && savingDecision === 'reject'}
                       onClick={() => void decide(review, 'reject')}
                     >
@@ -4955,6 +4958,11 @@ function AdminMeterReadingReviews() {
                         : 'Reject'}
                     </button>
                   </div>
+                  {actionErrorReviewId === review.id && actionError && (
+                    <p className="admin-meter-review-action-error" role="alert">
+                      {actionError}
+                    </p>
+                  )}
                 </div>
               </div>
             </article>

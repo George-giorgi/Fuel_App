@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  formatOcrCurrentFill,
   formatRawMeterDigitsAsLitres,
   ocrValueToRawDigits
 } from '../src/utils/meterReadings.js';
@@ -31,4 +32,11 @@ test('does not format invalid raw meter digits', () => {
   assert.equal(formatRawMeterDigitsAsLitres(''), null);
   assert.equal(formatRawMeterDigitsAsLitres('20.000'), null);
   assert.equal(formatRawMeterDigitsAsLitres('20,000'), null);
+});
+
+test('formats OCR current fill integers as raw milli-litres', () => {
+  assert.equal(formatOcrCurrentFill(null, 20000), '20.000');
+  assert.equal(formatOcrCurrentFill('20000', 20000), '20.000');
+  assert.equal(formatOcrCurrentFill(null, 20.125), '20.125');
+  assert.equal(formatOcrCurrentFill(null, null), 'Not recorded');
 });
