@@ -70,6 +70,33 @@ class PiusiOcrTests(unittest.TestCase):
 
         self.assertIsNone(result.raw_digits)
 
+    def test_current_fill_accepts_a_different_digit_count(self) -> None:
+        display = np.zeros((100, 350, 3), dtype=np.uint8)
+        boxes = [
+            (20 + index * 50, 20, 20, 60)
+            for index in range(6)
+        ]
+
+        with (
+            patch.object(piusi_lcd, "_group_components", return_value=boxes),
+            patch.object(
+                piusi_lcd, "_classify_glyph", return_value=("1", 0.9)
+            ),
+        ):
+            result = piusi_lcd._recognize_row(
+                display,
+                (0, 0, 1, 1),
+                minimum_digits=3,
+                split_wide_glyphs=False,
+                segment_threshold=0.35,
+                whole_number=True,
+                adaptive_masks=False,
+                minimum_agreeing_masks=1,
+            )
+
+        self.assertEqual(result.raw_digits, "111111")
+        self.assertEqual(result.value, Decimal("111.111"))
+
     def test_reference_reads_both_rows_with_three_decimal_places(self) -> None:
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
         example = labels["examples"][0]
@@ -101,6 +128,68 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(reconciled.current_fill_litres, 22032)
         self.assertEqual(reconciled.cumulative_total_litres, 261.563)
         self.assertEqual(reconciled.current_fill_decimal_position, 2)
+
+    def test_labeled_lcd_crops_match_digits_and_review_status(self) -> None:
+        labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
+        for example in labels["examples"][1:]:
+            with self.subTest(image=example["image"]):
+                result = recognize_piusi_lcd(
+                    (DATASET / example["image"]).read_bytes()
+                )
+                self.assertTrue(result.display_found)
+                self.assertEqual(
+                    result.current_fill.raw_digits,
+                    example["current_fill_raw_digits"],
+                )
+                self.assertEqual(
+                    result.current_fill.decimal_position,
+                    example["current_fill_decimal_position"],
+                )
+                self.assertEqual(
+                    result.current_fill.value,
+                    Decimal(example["current_fill"]),
+                )
+                self.assertEqual(
+                    result.cumulative_total.raw_digits,
+                    example["cumulative_total_raw_digits"],
+                )
+                self.assertEqual(
+                    result.cumulative_total.decimal_position,
+                    example["cumulative_total_decimal_position"],
+                )
+                self.assertEqual(
+                    result.cumulative_total.value,
+                    Decimal(example["cumulative_total"]),
+                )
+                vision_result = MeterOcrResult(
+                    status="ready",
+                    current_fill_litres=int(
+                        Decimal(example["current_fill"]) * 1000
+                    ),
+                    cumulative_total_litres=float(
+                        Decimal(example["cumulative_total"])
+                    ),
+                    current_fill_confidence=96,
+                    cumulative_total_confidence=94,
+                    current_fill_raw_digits=example[
+                        "current_fill_raw_digits"
+                    ],
+                    current_fill_decimal_position=example[
+                        "current_fill_decimal_position"
+                    ],
+                    cumulative_total_raw_digits=example[
+                        "cumulative_total_raw_digits"
+                    ],
+                    cumulative_total_decimal_position=example[
+                        "cumulative_total_decimal_position"
+                    ],
+                )
+                reconciled = _apply_piusi_evidence(
+                    vision_result, result, "google_vision"
+                )
+                self.assertEqual(
+                    reconciled.status, example["expected_ocr_status"]
+                )
 
     def test_cumulative_row_uses_adaptive_threshold_when_color_is_absent(self) -> None:
         image = piusi_lcd._load_oriented_image(REFERENCE.read_bytes())
@@ -271,7 +360,13 @@ class PiusiOcrTests(unittest.TestCase):
         draw.ellipse((250, 450, 365, 550), fill=(255, 255, 255, 180))
         glare = cv2.cvtColor(np.asarray(glare_image.convert("RGB")), cv2.COLOR_RGB2BGR)
 
-        for impaired in (blurred, low_light, angled, obscured, glare):
+        success, encoded = cv2.imencode(".jpg", angled)
+        self.assertTrue(success)
+        angled_lcd = recognize_piusi_lcd(encoded.tobytes())
+        self.assertEqual(angled_lcd.current_fill.raw_digits, "22032")
+        self.assertEqual(angled_lcd.cumulative_total.raw_digits, "261563")
+
+        for impaired in (blurred, low_light, obscured, glare):
             success, encoded = cv2.imencode(".jpg", impaired)
             self.assertTrue(success)
             lcd = recognize_piusi_lcd(encoded.tobytes())

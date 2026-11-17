@@ -68,10 +68,14 @@ def _load_oriented_image(content: bytes) -> np.ndarray:
     return cv2.cvtColor(np.asarray(image), cv2.COLOR_RGB2BGR)
 
 
-def _lcd_candidate(image: np.ndarray) -> np.ndarray | None:
+def _lcd_candidate(
+    image: np.ndarray, *, saturation_floor: int = 35
+) -> np.ndarray | None:
     height, width = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, _LCD_HSV_LOW, _LCD_HSV_HIGH)
+    lower_bound = _LCD_HSV_LOW.copy()
+    lower_bound[1] = saturation_floor
+    mask = cv2.inRange(hsv, lower_bound, _LCD_HSV_HIGH)
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (17, 13))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     contours, _ = cv2.findContours(
@@ -359,7 +363,7 @@ def _recognize_row(
             or any(digit is None for digit, _ in classified)
             or (
                 whole_number
-                and any(score < 0.65 for _, score in classified)
+                and any(score < 0.55 for _, score in classified)
             )
         ):
             return None
@@ -426,9 +430,117 @@ def _recognize_row(
     return readings[0]
 
 
+def _search_row_windows(
+    display: np.ndarray, *, total_row: bool
+) -> tuple[LcdRowReading | None, np.ndarray | None, bool]:
+    candidates: list[tuple[LcdRowReading, np.ndarray]] = []
+    height = display.shape[0]
+    scales = (1.5, 2.0) if total_row else (1.0,)
+    if height <= 100:
+        top_offsets = (0.55, 0.60, 0.65) if total_row else (
+            0.10,
+            0.15,
+            0.20,
+        )
+        bottom_offsets = (0.90, 0.95, 0.98) if total_row else (
+            0.70,
+            0.80,
+            0.85,
+        )
+        right_edges = (0.65, 0.68, 0.72)
+    else:
+        top_offsets = (0.55, 0.60, 0.65, 0.70) if total_row else (
+            0.30,
+            0.36,
+            0.42,
+            0.48,
+        )
+        bottom_offsets = (0.82, 0.88, 0.94, 0.98) if total_row else (
+            0.64,
+            0.70,
+            0.76,
+            0.82,
+        )
+        right_edges = (0.65, 0.72, 0.80)
+
+    for scale in scales:
+        scaled_display = (
+            cv2.resize(
+                display,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_CUBIC,
+            )
+            if scale != 1
+            else display
+        )
+        scaled_height, scaled_width = scaled_display.shape[:2]
+        for top in top_offsets:
+            for bottom in bottom_offsets:
+                if bottom - top < (0.22 if total_row else 0.25):
+                    continue
+                for right in right_edges:
+                    bounds = (0.02, top, right, bottom)
+                    reading = _recognize_row(
+                        scaled_display,
+                        bounds,
+                        minimum_digits=4 if total_row else 3,
+                        split_wide_glyphs=total_row,
+                        segment_threshold=0.45 if total_row else 0.35,
+                        whole_number=True,
+                        mask_right_fraction=0.71 if total_row else None,
+                        adaptive_masks=True,
+                        minimum_agreeing_masks=2,
+                    )
+                    if reading.raw_digits is None:
+                        continue
+                    x1 = round(scaled_width * bounds[0])
+                    y1 = round(scaled_height * bounds[1])
+                    x2 = round(scaled_width * bounds[2])
+                    y2 = round(scaled_height * bounds[3])
+                    candidates.append(
+                        (reading, scaled_display[y1:y2, x1:x2])
+                    )
+
+    if not candidates:
+        return None, None, False
+
+    counts: dict[str, int] = {}
+    confidences: dict[str, float] = {}
+    for reading, _ in candidates:
+        digits = reading.raw_digits
+        if digits is not None:
+            counts[digits] = counts.get(digits, 0) + 1
+            confidences[digits] = max(
+                confidences.get(digits, 0.0), reading.confidence or 0.0
+            )
+    ranked_digits = sorted(
+        counts,
+        key=lambda digits: (counts[digits], confidences[digits]),
+        reverse=True,
+    )
+    best_digits = ranked_digits[0]
+    matching = [
+        (reading, crop)
+        for reading, crop in candidates
+        if reading.raw_digits == best_digits
+    ]
+    best_reading, best_crop = max(
+        matching, key=lambda item: item[0].confidence or 0
+    )
+    ambiguous = (
+        len(ranked_digits) > 1
+        and counts[ranked_digits[1]] >= counts[ranked_digits[0]] * 0.75
+    )
+    return best_reading, best_crop, ambiguous
+
+
 def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
     image = _load_oriented_image(content)
     display = _lcd_candidate(image)
+    if display is None:
+        display = _lcd_candidate(image, saturation_floor=25)
     if display is None:
         missing = LcdRowReading(None, None, None, None)
         return PiusiLcdRecognition(
@@ -457,7 +569,6 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         split_wide_glyphs=False,
         segment_threshold=0.35,
         whole_number=True,
-        expected_digits=5,
         adaptive_masks=False,
         minimum_agreeing_masks=1,
     )
@@ -468,10 +579,49 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         split_wide_glyphs=True,
         segment_threshold=0.45,
         whole_number=True,
-        expected_digits=6,
         mask_right_fraction=0.71,
     )
     warnings = []
+    display_height, _ = display.shape[:2]
+    search_short_display = display_height <= 100
+    if current.raw_digits is None or search_short_display:
+        alternative, crop, ambiguous = _search_row_windows(
+            display, total_row=False
+        )
+        if alternative is not None:
+            if (
+                current.raw_digits is not None
+                and current.raw_digits != alternative.raw_digits
+            ):
+                warnings.append(
+                    "Primary and alternate LCD crops disagree on the top-row digits; manual review is required."
+                )
+            current = alternative
+            if crop is not None:
+                current_row = crop
+            if ambiguous:
+                warnings.append(
+                    "Alternate LCD crops disagree on the top-row digits; manual review is required."
+                )
+    if total.raw_digits is None or search_short_display:
+        alternative, crop, ambiguous = _search_row_windows(
+            display, total_row=True
+        )
+        if alternative is not None:
+            if (
+                total.raw_digits is not None
+                and total.raw_digits != alternative.raw_digits
+            ):
+                warnings.append(
+                    "Primary and alternate LCD crops disagree on the TOTAL-row digits; manual review is required."
+                )
+            total = alternative
+            if crop is not None:
+                total_row = crop
+            if ambiguous:
+                warnings.append(
+                    "Alternate LCD crops disagree on the TOTAL-row digits; manual review is required."
+                )
     if current.raw_digits is None:
         warnings.append("Seven-segment recognition could not read the top row.")
     if total.raw_digits is None:
