@@ -40,10 +40,8 @@ class FuelRecordRead(BaseModel):
     cumulative_total_litres: float | None
     meter_delta_litres: float | None
     current_fill_milli_litres: int | None = None
-    top_current_fill_milli_litres: int | None = None
     cumulative_total_integer: int | None = None
     previous_global_total_integer: int | None = None
-    current_fill_raw_digits: str | None = None
     cumulative_total_raw_digits: str | None = None
     meter_reading_source: str = "legacy"
     reading_source: str | None = None
@@ -72,14 +70,12 @@ class FuelRecordCreate(BaseModel):
     meter_photo_id: int | None = Field(default=None, gt=0)
     odometer_miles: float = Field(ge=0, allow_inf_nan=False)
     vehicle_id: int | None = Field(default=None, gt=0)
-    current_fill_litres: Decimal | None = Field(
-        default=None, gt=0, allow_inf_nan=False
-    )
     cumulative_total_litres: Decimal | None = Field(
         default=None, ge=0, allow_inf_nan=False, decimal_places=3
     )
-    current_fill_raw_digits: str | None = Field(default=None, max_length=32)
-    cumulative_total_raw_digits: str | None = Field(default=None, max_length=32)
+    cumulative_total_raw_digits: str | None = Field(
+        default=None, min_length=6, max_length=18
+    )
     confirmed: bool = False
     calculated_fill_confirmed: bool = False
 
@@ -87,9 +83,7 @@ class FuelRecordCreate(BaseModel):
     def validate_meter_readings(self) -> "FuelRecordCreate":
         if self.meter_photo_id is not None:
             if (
-                self.current_fill_litres is not None
-                or self.cumulative_total_litres is not None
-                or self.current_fill_raw_digits is not None
+                self.cumulative_total_litres is not None
                 or self.cumulative_total_raw_digits is not None
                 or self.confirmed
             ):
@@ -98,45 +92,31 @@ class FuelRecordCreate(BaseModel):
                 )
             return self
 
-        has_fill = (
-            self.current_fill_litres is not None
-            or self.current_fill_raw_digits is not None
-        )
         has_total = (
             self.cumulative_total_litres is not None
             or self.cumulative_total_raw_digits is not None
         )
-        if not has_total or (has_fill and not has_total):
+        if not has_total:
             raise ValueError(
                 "Enter global cumulative-total digits when submitting without a photo."
             )
         if not self.confirmed:
             raise ValueError("Confirm the meter readings before submitting.")
         if (
-            self.current_fill_litres is not None
-            and self.current_fill_raw_digits is not None
-        ) or (
             self.cumulative_total_litres is not None
             and self.cumulative_total_raw_digits is not None
         ):
-            raise ValueError("Provide raw digits or legacy numeric readings, not both.")
-        for field_name in (
-            "current_fill_raw_digits",
-            "cumulative_total_raw_digits",
+            raise ValueError("Provide raw digits or a legacy numeric reading, not both.")
+        if self.cumulative_total_raw_digits is not None and (
+            not self.cumulative_total_raw_digits.isascii()
+            or not self.cumulative_total_raw_digits.isdigit()
         ):
-            value = getattr(self, field_name)
-            if value is not None and (
-                not value.isascii() or not value.isdigit()
-            ):
-                raise ValueError(f"{field_name} must contain digits only.")
+            raise ValueError("Global cumulative total must contain digits only.")
         if (
-            self.current_fill_litres is not None
-            and self.current_fill_litres.as_tuple().exponent < -3
-        ) or (
             self.cumulative_total_litres is not None
             and self.cumulative_total_litres.as_tuple().exponent < -3
         ):
-            raise ValueError("Legacy fill and total values allow up to 3 decimals.")
+            raise ValueError("Legacy total values allow up to 3 decimals.")
         return self
 
 
@@ -200,17 +180,13 @@ class MeterReadingPreviewRequest(BaseModel):
         extra="forbid",
     )
 
-    current_fill_raw_digits: str | None = Field(default=None, max_length=32)
-    cumulative_total_raw_digits: str = Field(min_length=1, max_length=32)
+    cumulative_total_raw_digits: str = Field(min_length=6, max_length=18)
 
     @model_validator(mode="after")
     def validate_digits(self) -> "MeterReadingPreviewRequest":
-        for value in (
-            self.current_fill_raw_digits,
-            self.cumulative_total_raw_digits,
-        ):
-            if value is not None and (not value.isascii() or not value.isdigit()):
-                raise ValueError("Meter readings must contain digits only.")
+        value = self.cumulative_total_raw_digits
+        if not value.isascii() or not value.isdigit():
+            raise ValueError("Meter readings must contain digits only.")
         return self
 
 
@@ -221,10 +197,12 @@ class MeterReadingPreviewRead(BaseModel):
     )
 
     fill_milli_litres: int | None
-    top_current_fill_milli_litres: int | None
     previous_total_litres: float | None
+    previous_total_milli_litres: int | None = None
     cumulative_total_litres: float
+    cumulative_total_milli_litres: int
     delta_litres: float | None
+    delta_milli_litres: int | None = None
     fill_calculation: str | None
     fill_source: str | None
     reading_source: str

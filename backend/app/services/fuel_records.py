@@ -42,7 +42,6 @@ from backend.app.services.meter_readings import (
     assess_meter_readings,
     decimal_to_milli_litres,
     milli_litres_to_decimal,
-    parse_fill_raw_digits,
     parse_total_raw_digits,
 )
 
@@ -98,9 +97,8 @@ def create_fuel_record(
         )
 
     meter_photo = None
-    raw_fill = request.current_fill_raw_digits
+    raw_fill = None
     raw_total = request.cumulative_total_raw_digits
-    top_fill_milli_litres: int | None = None
     source = "MANUAL"
     if request.meter_photo_id is not None:
         meter_photo = get_meter_photo_by_id(session, request.meter_photo_id)
@@ -114,7 +112,6 @@ def create_fuel_record(
             raise MeterPhotoNotVerified(
                 "Verify the meter readings against the photo before submitting."
             )
-        raw_fill = meter_photo.current_fill_raw_digits
         raw_total = meter_photo.cumulative_total_raw_digits
         stored_source = (meter_photo.reading_source or "").upper()
         if stored_source in {"MANUAL", "GOOGLE_VISION", "OPENCV"}:
@@ -129,21 +126,28 @@ def create_fuel_record(
             raise MeterPhotoNotVerified(
                 "The verified meter reading source is unknown."
             )
-        top_fill_milli_litres = meter_photo.top_current_fill_milli_litres
-        if top_fill_milli_litres is None and raw_fill:
-            try:
-                top_fill_milli_litres = parse_fill_raw_digits(raw_fill)
-            except InvalidMeterDigits as error:
-                raise FuelSubmissionError(str(error)) from error
         cumulative_total = (
             meter_photo.cumulative_total_integer
             if meter_photo.cumulative_total_integer is not None
             else None
         )
-        if meter_photo.ocr_warnings:
-            source_warnings = list(meter_photo.ocr_warnings)
-        else:
-            source_warnings = []
+        source_warnings = list(
+            meter_photo.reading_warnings
+            if meter_photo.reading_warnings is not None
+            else meter_photo.ocr_warnings or []
+        )
+        if meter_photo.cumulative_total_manually_corrected:
+            resolved_ocr_warnings = set(meter_photo.ocr_warnings or [])
+            source_warnings = [
+                warning
+                for warning in source_warnings
+                if (
+                    warning not in resolved_ocr_warnings
+                    and warning
+                    != "The employee corrected or manually entered the OCR-suggested TOTAL digits."
+                )
+                or "matches an earlier upload" in warning
+            ]
         if session.scalar(
             select(FuelRecord.id).where(FuelRecord.meter_photo_id == meter_photo.id)
         ):
@@ -157,28 +161,12 @@ def create_fuel_record(
             )
         source_warnings = []
         try:
-            if raw_fill is not None:
-                top_fill_milli_litres = parse_fill_raw_digits(raw_fill)
-            elif request.current_fill_litres is not None:
-                fill_value = request.current_fill_litres
-                if (
-                    not fill_value.is_finite()
-                    or fill_value < 0
-                    or fill_value.as_tuple().exponent < -3
-                ):
-                    raise InvalidMeterDigits(
-                        "Fill must be non-negative with no more than 3 decimals."
-                    )
-                top_fill_milli_litres = int(fill_value * 1000)
-                raw_fill = str(top_fill_milli_litres)
-            else:
-                top_fill_milli_litres = None
             if raw_total is not None:
                 cumulative_total = parse_total_raw_digits(raw_total)
             elif request.cumulative_total_litres is not None:
                 total_value = request.cumulative_total_litres
                 cumulative_total = decimal_to_milli_litres(total_value)
-                raw_total = str(cumulative_total)
+                raw_total = str(cumulative_total).zfill(6)
             else:
                 cumulative_total = None
         except InvalidMeterDigits as error:
@@ -223,12 +211,16 @@ def create_fuel_record(
             "The existing global total has no exact milli-litre value. "
             "An administrator must investigate it before new readings can be accepted."
         )
+    if previous_total is None:
+        raise FuelSubmissionError(
+            "There is no previous accepted cumulative total, so fuel dispensed "
+            "cannot be calculated. An administrator must establish the meter baseline."
+        )
     assessment = assess_meter_readings(
-        fill_milli_litres=top_fill_milli_litres,
+        fill_milli_litres=None,
         previous_total_milli_litres=previous_total,
         cumulative_total_milli_litres=cumulative_total,
         source=source,
-        tank_capacity_litres=vehicle.tank_capacity,
     )
     if meter_photo is not None:
         assessment_warnings = set(assessment.warnings)
@@ -240,7 +232,7 @@ def create_fuel_record(
     effective_calculation = assessment.fill_calculation
     if (
         effective_calculation == "global_total_difference"
-        and assessment.top_current_fill_milli_litres is None
+        and assessment.top_current_fill_milli_litres is not None
         and not request.calculated_fill_confirmed
     ):
         calculated_litres = milli_litres_to_decimal(
@@ -253,6 +245,9 @@ def create_fuel_record(
     combined_warnings = list(
         dict.fromkeys(list(source_warnings) + list(assessment.warnings))
     )
+    fill_milli_litres = assessment.fill_milli_litres
+    fill_source = assessment.fill_source
+    fill_calculation = assessment.fill_calculation
     duplicate_record_id = session.scalar(
         select(FuelRecord.id)
         .where(
@@ -299,46 +294,7 @@ def create_fuel_record(
             "This meter photo has already been submitted for administrator review."
         )
 
-    fill_milli_litres = assessment.fill_milli_litres
-    fill_source = assessment.fill_source
-    fill_calculation = assessment.fill_calculation
-    if (
-        fill_milli_litres is not None
-        and fill_milli_litres > MAX_FILL_MILLI_LITRES
-        and assessment.top_current_fill_milli_litres is None
-    ):
-        raise FuelSubmissionError(
-            "Fill exceeds the 100 litre limit. Enter the top-row digits if "
-            "the photographed fill is within the limit."
-        )
-    if (
-        fill_milli_litres is None
-        or fill_milli_litres > MAX_FILL_MILLI_LITRES
-    ):
-        if assessment.top_current_fill_milli_litres is None:
-            raise FuelSubmissionError(
-                "A valid fill amount could not be calculated. Enter the "
-                "top-row fill digits; readings are saved directly without review."
-            )
-        fill_milli_litres = assessment.top_current_fill_milli_litres
-        fill_source = "TOP_ROW"
-        fill_calculation = None
-    if fill_milli_litres <= 0 or fill_milli_litres > MAX_FILL_MILLI_LITRES:
-        raise FuelSubmissionError(
-            "Fill must be greater than zero and no more than 100 litres. "
-            "Correct the top-row digits and submit again."
-        )
-
-    baseline_warning = (
-        "There is no previous global total; this reading establishes the baseline."
-    )
-    baseline_only = (
-        previous_total is None
-        and not source_warnings
-        and assessment.top_current_fill_milli_litres is not None
-        and assessment.warnings == (baseline_warning,)
-    )
-    if combined_warnings and not baseline_only:
+    if combined_warnings:
         review = MeterReadingReview(
             employee_id=employee.id,
             vehicle_id=vehicle.id,
@@ -366,10 +322,18 @@ def create_fuel_record(
         session.flush()
         return review
 
+    if fill_milli_litres is None:
+        raise FuelSubmissionError(
+            "Fuel dispensed could not be calculated from the previous and new TOTAL readings."
+        )
+    if fill_milli_litres <= 0:
+        raise FuelSubmissionError(
+            "Fuel dispensed must be greater than zero."
+        )
     fill_value = milli_litres_to_decimal(fill_milli_litres)
     if fill_value is None:
         raise FuelSubmissionError(
-            "Fill could not be calculated. Enter the top-row digits and submit again."
+            "Fuel dispensed could not be calculated from the cumulative TOTAL."
         )
     current_fill = float(fill_value)
     cumulative_total_value = float(milli_litres_to_decimal(cumulative_total))
@@ -397,10 +361,10 @@ def create_fuel_record(
         cumulative_total_litres=cumulative_total_value,
         meter_delta_litres=meter_delta,
         current_fill_milli_litres=fill_milli_litres,
-        top_current_fill_milli_litres=assessment.top_current_fill_milli_litres,
+        top_current_fill_milli_litres=None,
         cumulative_total_integer=cumulative_total,
         previous_global_total_integer=previous_total,
-        current_fill_raw_digits=raw_fill,
+        current_fill_raw_digits=None,
         cumulative_total_raw_digits=raw_total,
         meter_reading_source=fill_source or assessment.source,
         reading_source=assessment.source,
@@ -468,9 +432,6 @@ def preview_meter_reading(
     request: MeterReadingPreviewRequest,
 ) -> dict[str, object]:
     try:
-        fill_milli_litres = parse_fill_raw_digits(
-            request.current_fill_raw_digits
-        )
         cumulative_total = parse_total_raw_digits(
             request.cumulative_total_raw_digits
         )
@@ -479,25 +440,27 @@ def preview_meter_reading(
     global_meter_state = get_or_create_global_meter_state(session)
     previous_total = global_meter_state.current_total_integer
     assessment = assess_meter_readings(
-        fill_milli_litres=fill_milli_litres,
+        fill_milli_litres=None,
         previous_total_milli_litres=previous_total,
         cumulative_total_milli_litres=cumulative_total,
         source="MANUAL",
     )
     return {
         "fill_milli_litres": assessment.fill_milli_litres,
-        "top_current_fill_milli_litres": assessment.top_current_fill_milli_litres,
         "previous_total_litres": (
             float(milli_litres_to_decimal(assessment.previous_total_milli_litres))
             if assessment.previous_total_milli_litres is not None
             else None
         ),
+        "previous_total_milli_litres": assessment.previous_total_milli_litres,
         "cumulative_total_litres": float(milli_litres_to_decimal(cumulative_total)),
+        "cumulative_total_milli_litres": cumulative_total,
         "delta_litres": (
             float(milli_litres_to_decimal(assessment.delta_milli_litres))
             if assessment.delta_milli_litres is not None
             else None
         ),
+        "delta_milli_litres": assessment.delta_milli_litres,
         "fill_calculation": assessment.fill_calculation,
         "fill_source": assessment.fill_source,
         "reading_source": assessment.source,

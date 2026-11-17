@@ -40,7 +40,6 @@ import {
   formatMileage
 } from './utils/distance.js';
 import {
-  formatOcrCurrentFill as formatOcrCurrentFillValue,
   formatRawMeterDigitsAsLitres,
   ocrValueToRawDigits,
   rawMeterDigitsToLitres
@@ -48,7 +47,7 @@ import {
 
 const REPORT_EMAIL = 'fleet@yourcompany.com';
 const SUBMISSION_NOTICE =
-  'Top-row digits are stored as exact 0.001 L increments. Readings and warnings are saved with your fuel record; the global total advances only for a valid baseline or reconciled reading.';
+  'Fuel dispensed is calculated from the difference between accepted cumulative TOTAL readings. The original photo and OCR evidence are retained with the confirmed reading.';
 
 function Brand() {
   return (
@@ -381,7 +380,7 @@ function SessionRestoreScreen() {
   );
 }
 
-function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
+function MeterPhotoFlow({ onVerified, vehicleId }) {
   const videoRef = useRef(null);
   const [entryMode, setEntryMode] = useState('photo');
   const [photo, setPhoto] = useState(null);
@@ -394,12 +393,13 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
   const [uploadStatus, setUploadStatus] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState('');
-  const [currentFillDraft, setCurrentFillDraft] = useState('');
   const [cumulativeTotalDraft, setCumulativeTotalDraft] = useState('');
-  const [manualCurrentFillDraft, setManualCurrentFillDraft] = useState('');
   const [manualCumulativeTotalDraft, setManualCumulativeTotalDraft] = useState('');
   const [manualEvidenceFile, setManualEvidenceFile] = useState(null);
   const [manualConfirmed, setManualConfirmed] = useState(false);
+  const [readingPreview, setReadingPreview] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
 
   useEffect(() => {
     if (!previewUrl) return undefined;
@@ -408,9 +408,39 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
 
   useEffect(() => {
     if (!photo || photo.verifiedAt) return;
-    setCurrentFillDraft(currentFillDraftValue(photo));
     setCumulativeTotalDraft(cumulativeTotalDraftValue(photo));
   }, [photo]);
+
+  useEffect(() => {
+    setReadingPreview(null);
+    setPreviewError('');
+    if (
+      !photo ||
+      photo.verifiedAt ||
+      !/^[0-9]{6,18}$/.test(cumulativeTotalDraft.trim())
+    ) {
+      setPreviewLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    const timeoutId = window.setTimeout(() => {
+      setPreviewLoading(true);
+      previewFuelReading({
+        cumulativeTotalRawDigits: cumulativeTotalDraft.trim()
+      }).then((preview) => {
+        if (active) setReadingPreview(preview);
+      }).catch((previewRequestError) => {
+        if (active) setPreviewError(previewRequestError.message);
+      }).finally(() => {
+        if (active) setPreviewLoading(false);
+      });
+    }, 180);
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [cumulativeTotalDraft, photo]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -513,7 +543,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
     setUploadStatus('Preparing secure photo upload...');
     try {
       const uploadSession = await startMeterPhotoSession(vehicleId);
-      setUploadStatus('Uploading the sheet and reading both values...');
+      setUploadStatus('Uploading the photo and reading the TOTAL row...');
       const uploadedPhoto = await uploadMeterPhoto(
         uploadSession.sessionToken,
         pendingPhoto
@@ -537,7 +567,6 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
     try {
       const verifiedPhoto = await verifyMeterPhoto(photo.id, {
         confirmed: true,
-        currentFillRawDigits: currentFillDraft.trim() || undefined,
         cumulativeTotalRawDigits: cumulativeTotalDraft.trim() || undefined
       });
       setPhoto(verifiedPhoto);
@@ -554,20 +583,17 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
     setPhoto(null);
     setPendingPhoto(null);
     setPreviewUrl(null);
-    setManualCurrentFillDraft('');
     setManualCumulativeTotalDraft('');
     setManualEvidenceFile(null);
     setManualConfirmed(false);
     setEntryMode('manual');
     setError('');
     onVerified(null);
-    onManualReadings(null);
   }
 
   function enterPhotoMode() {
     setEntryMode('photo');
     setManualConfirmed(false);
-    onManualReadings(null);
   }
 
   async function handleManualConfirm(event) {
@@ -578,7 +604,6 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
       return;
     }
     const readings = {
-      currentFillRawDigits: manualCurrentFillDraft.trim() || undefined,
       cumulativeTotalRawDigits: manualCumulativeTotalDraft.trim()
     };
     setVerifying(true);
@@ -597,7 +622,6 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
       setPhoto(verifiedPhoto);
       setPreviewUrl(URL.createObjectURL(manualEvidenceFile));
       setEntryMode('photo');
-      onManualReadings(null);
       onVerified(verifiedPhoto);
     } catch (requestError) {
       setError(requestError.message);
@@ -611,11 +635,9 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
     setPhoto(null);
     setPendingPhoto(null);
     setPreviewUrl(null);
-    setCurrentFillDraft('');
     setCumulativeTotalDraft('');
     setError('');
     setEntryMode('photo');
-    onManualReadings(null);
     onVerified(null);
     void openCamera();
   }
@@ -630,66 +652,42 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             <AppIcon name="meter" size={17} />
             <span>
               {entryMode === 'manual'
-                ? 'Enter PIUSI meter readings'
-                : 'Capture PIUSI meter display'}
+                ? 'Enter PIUSI TOTAL reading'
+                : 'Capture PIUSI meter TOTAL'}
             </span>
           </h4>
           <p className="meter-photo-copy">
             {entryMode === 'manual'
-              ? 'The top row is the resettable fill; the smaller row marked TOTAL is the non-resettable cumulative total.'
-              : 'Keep the display centered and close so both readings are visible. The top row is the resettable fill; the smaller row marked TOTAL is the non-resettable cumulative total. Keep the digits in focus and avoid glare.'}
+              ? 'Only the smaller bottom row labelled TOTAL is used. Check every digit and its three implied decimal places.'
+              : 'Keep the display centered and close. Only the smaller bottom row labelled TOTAL is used; keep its digits in focus and avoid glare.'}
           </p>
           <div
             className="reading-sheet-template"
-            aria-label="PIUSI display reading order"
+            aria-label="PIUSI TOTAL scale"
           >
-            <p><strong>Large top row:</strong> raw fill digits ÷ 1,000 = litres</p>
-            <p><strong>Smaller TOTAL row:</strong> raw digits ÷ 1,000 = litres</p>
+            <p><strong>TOTAL row:</strong> raw digits ÷ 1,000 = litres</p>
           </div>
         </div>
       </div>
       {entryMode === 'manual' && (
         <form className="meter-review-form" onSubmit={handleManualConfirm}>
           <p>
-            Enter the displayed raw digits exactly; the decimal point is
-            implied for both rows. For example, 20000 means 20.000 L and
-            120000 means 120.000 L. Manual digit entry still requires a photo
-            of the meter as supporting evidence.
+            Enter all six or more TOTAL digits exactly. The decimal point is
+            three places from the right: 261789 means 261.789 L. Manual digit
+            entry still requires a photo of the meter as supporting evidence.
           </p>
-          <label>
-            Fill raw digits (top row)
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="off"
-              pattern="[0-9]+"
-              value={manualCurrentFillDraft}
-              onChange={(event) => {
-                setManualCurrentFillDraft(event.target.value);
-                setManualConfirmed(false);
-                onManualReadings(null);
-              }}
-              placeholder="e.g. 22032 = 22.032 L"
-            />
-            {formatRawMeterDigitsAsLitres(manualCurrentFillDraft) != null && (
-              <small aria-live="polite">
-                Interpreted as {formatRawMeterDigitsAsLitres(manualCurrentFillDraft)} L
-              </small>
-            )}
-          </label>
           <label>
             Global cumulative raw digits (TOTAL row)
             <input
               type="text"
               inputMode="numeric"
               autoComplete="off"
-              pattern="[0-9]+"
+              pattern="[0-9]{6,18}"
               required
               value={manualCumulativeTotalDraft}
               onChange={(event) => {
                 setManualCumulativeTotalDraft(event.target.value);
                 setManualConfirmed(false);
-                onManualReadings(null);
               }}
               placeholder="e.g. 261563 = 261.563 L"
             />
@@ -709,7 +707,6 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
               onChange={(event) => {
                 setManualEvidenceFile(event.target.files?.[0] ?? null);
                 setManualConfirmed(false);
-                onManualReadings(null);
               }}
             />
           </label>
@@ -720,11 +717,9 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
               checked={manualConfirmed}
               onChange={(event) => {
                 setManualConfirmed(event.target.checked);
-                if (!event.target.checked) onManualReadings(null);
               }}
             />
-            I checked the available digits against the meter. If the top row is
-            missing, the app may calculate the fill from the global total.
+            I checked the complete TOTAL digits against the meter photo.
           </label>
           <button
             className="primary-button"
@@ -732,7 +727,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             disabled={verifying || !manualEvidenceFile}
           >
             <AppIcon name="check" size={16} />
-            {verifying ? 'Uploading meter photo...' : 'Confirm manual readings'}
+            {verifying ? 'Uploading meter photo...' : 'Confirm manual TOTAL'}
           </button>
           <button
             className="outline-button"
@@ -742,7 +737,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             Use photo and OCR instead
           </button>
           {manualConfirmed && (
-            <p role="status">Manual readings confirmed. Enter the odometer below.</p>
+            <p role="status">Manual TOTAL confirmed. Enter the odometer below.</p>
           )}
         </form>
       )}
@@ -762,7 +757,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             <strong aria-live="polite">
               {openingCamera ? 'Opening camera...' : 'Open camera'}
             </strong>
-            <small>Capture both PIUSI display readings in one clear photo</small>
+            <small>Capture the bottom TOTAL row in one clear photo</small>
           </span>
           <span className="camera-start-arrow" aria-hidden="true">-&gt;</span>
         </button>
@@ -777,8 +772,8 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             aria-label="Live meter camera preview"
           />
           <p className="meter-photo-copy">
-            Keep the display centered and close so both rows are readable. Hold the
-            camera steady, focus on the digits, and avoid reflections or glare.
+            Keep the display centered and close so the bottom TOTAL row is
+            readable. Hold the camera steady, focus on the digits, and avoid glare.
           </p>
           <div className="meter-camera-actions">
             <button
@@ -843,7 +838,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             <img
               className="meter-photo-preview"
               src={previewUrl}
-              alt={`Uploaded meter readings for ${photo.registrationNumber}`}
+              alt={`Uploaded PIUSI TOTAL meter reading for ${photo.registrationNumber}`}
             />
           )}
           <div className="meter-review-status" role="status">
@@ -855,25 +850,8 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
           <div className="meter-readings">
             <div>
               <span className="meter-reading-label">
-                <AppIcon name="fuel" size={14} />
-                <span>Current Fill</span>
-              </span>
-              <strong>
-                {formatOcrCurrentFill(photo)}
-                {photo.ocrCurrentFillConfidence != null &&
-                  ` (${Math.round(photo.ocrCurrentFillConfidence)}% confidence)`}
-              </strong>
-              <small>
-                Digits only; decimal point ignored. Recognized digits:{' '}
-                {photo.ocrCurrentFillRawDigits || 'not detected'}.
-                {photo.ocrCurrentFillSegmentConfidence != null &&
-                  ` Segment confidence ${Math.round(photo.ocrCurrentFillSegmentConfidence)}%.`}
-              </small>
-            </div>
-            <div>
-              <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
-                <span>Cumulative Total</span>
+                <span>OCR-suggested Global Cumulative Total</span>
               </span>
               <strong>
                 {formatOcrCumulativeTotal(photo)}
@@ -881,7 +859,7 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
                   ` (${Math.round(photo.ocrCumulativeTotalConfidence)}% confidence)`}
               </strong>
               <small>
-                Digits only; decimal point ignored. Recognized digits:{' '}
+                OCR raw digits (retained):{' '}
                 {photo.ocrCumulativeTotalRawDigits || 'not detected'}.
                 {photo.ocrCumulativeTotalSegmentConfidence != null &&
                   ` Segment confidence ${Math.round(photo.ocrCumulativeTotalSegmentConfidence)}%.`}
@@ -899,52 +877,44 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
             <div className="meter-readings verified-readings" role="status">
               <div>
                 <span className="meter-reading-label">
-                  <AppIcon name="fuel" size={14} />
-                  <span>Calculated Fill (global difference)</span>
+                  <AppIcon name="meter" size={14} />
+                  <span>Confirmed Global Cumulative Total</span>
                 </span>
                 <strong>
-                  {photo.currentFillMilliLitres == null
-                    ? formatCurrentFill(photo.currentFillLitres)
-                    : formatMilliLitres(photo.currentFillMilliLitres)}
-                  {photo.currentFillLitres == null ? '' : ' litres'}
+                  {photo.cumulativeTotalInteger == null
+                    ? formatCumulativeTotal(photo.cumulativeTotalLitres)
+                    : `${formatMilliLitres(photo.cumulativeTotalInteger)} L`}
                 </strong>
                 <small>
-                  Fill source: {photo.fillSource || 'GLOBAL_DIFFERENCE'}
-                </small>
-                <small>
-                  Top-row evidence:{' '}
-                  {photo.topCurrentFillMilliLitres == null
-                    ? 'missing'
-                    : `${(photo.topCurrentFillMilliLitres / 1000).toFixed(3)} L`}
-                  {photo.topCurrentFillMilliLitres == null ||
-                  photo.currentFillMilliLitres == null
-                    ? ''
-                    : ` · difference ${((photo.topCurrentFillMilliLitres - photo.currentFillMilliLitres) / 1000).toFixed(3)} L`}
+                  {photo.cumulativeTotalManuallyCorrected
+                    ? 'Manually corrected from the original OCR suggestion.'
+                    : 'Accepted unchanged from the OCR suggestion.'}
                 </small>
               </div>
               <div>
                 <span className="meter-reading-label">
-                  <AppIcon name="meter" size={14} />
-                  <span>Verified Cumulative Total</span>
+                  <AppIcon name="fuel" size={14} />
+                  <span>Fuel dispensed from TOTAL difference</span>
                 </span>
                 <strong>
-                  {formatCumulativeTotal(photo.cumulativeTotalLitres)}
-                  {photo.cumulativeTotalLitres == null ? '' : ' litres'}
+                  {photo.currentFillMilliLitres == null
+                    ? 'Cannot calculate'
+                    : `${formatMilliLitres(photo.currentFillMilliLitres)} L`}
                 </strong>
                 <small>
-                  Previous global total:{' '}
+                  Previous accepted global total:{' '}
                   {photo.previousGlobalTotalInteger == null
                     ? 'not established'
                     : `${formatMilliLitres(photo.previousGlobalTotalInteger)} L`}
-                  {' · Status: '}
-                  {photo.reconciliationStatus === 'review_required'
-                    ? 'warning'
-                    : photo.reconciliationStatus || 'warning'}
-                </small>
-                <small>
-                  Reading source: {photo.readingSource || 'unknown'}
                 </small>
               </div>
+              {photo.readingWarnings?.length > 0 && (
+                <ul className="meter-ocr-warnings" aria-label="Reading warnings">
+                  {photo.readingWarnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
               <button
                 className="outline-button"
                 type="button"
@@ -956,38 +926,23 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
           ) : (
             <form className="meter-review-form" onSubmit={handleVerify}>
               <p>
-                Review the original photo. Enter the top-row raw digits and
-                bottom-row whole-number digits exactly. Leave the top row blank
-                only when it is unavailable and should be calculated from the
-                global difference.
+                Review the original photo and correct the TOTAL digits if needed.
+                The decimal point is three places from the right; for example,
+                261789 means 261.789 L.
               </p>
               <label>
-                Fill raw digits (top row)
+                Global Cumulative Total
                 <input
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
-                  pattern="[0-9]+"
-                  value={currentFillDraft}
-                  onChange={(event) => setCurrentFillDraft(event.target.value)}
-                  placeholder="e.g. 22032 = 22.032 L"
-                />
-                {formatRawMeterDigitsAsLitres(currentFillDraft) != null && (
-                  <small aria-live="polite">
-                    Interpreted as {formatRawMeterDigitsAsLitres(currentFillDraft)} L
-                  </small>
-                )}
-              </label>
-              <label>
-                Global cumulative raw digits (TOTAL row)
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  pattern="[0-9]+"
+                  pattern="[0-9]{6,18}"
+                  minLength={6}
+                  maxLength={18}
+                  required
                   value={cumulativeTotalDraft}
                   onChange={(event) => setCumulativeTotalDraft(event.target.value)}
-                  placeholder="e.g. 261563 = 261.563 L"
+                  placeholder="e.g. 261789"
                 />
                 {formatRawMeterDigitsAsLitres(cumulativeTotalDraft) != null && (
                   <small aria-live="polite">
@@ -995,17 +950,54 @@ function MeterPhotoFlow({ onVerified, onManualReadings, vehicleId }) {
                   </small>
                 )}
               </label>
+              {previewLoading && (
+                <p role="status">Calculating against the previous accepted total...</p>
+              )}
+              {previewError && (
+                <p className="auth-error" role="alert">{previewError}</p>
+              )}
+              {readingPreview && (
+                <div className="notice" role="note">
+                  <p>
+                    Previous accepted total:{' '}
+                    <strong>
+                      {readingPreview.previousTotalMilliLitres == null
+                        ? 'not established'
+                        : `${formatMilliLitres(readingPreview.previousTotalMilliLitres)} L`}
+                    </strong>
+                  </p>
+                  <p>
+                    Calculated fuel dispensed:{' '}
+                    <strong>
+                      {readingPreview.fillMilliLitres == null
+                        ? 'not available'
+                        : `${formatMilliLitres(readingPreview.fillMilliLitres)} L`}
+                    </strong>
+                  </p>
+                  {readingPreview.warnings?.length > 0 && (
+                    <ul className="meter-ocr-warnings" aria-label="Reading preview warnings">
+                      {readingPreview.warnings.map((warning) => (
+                        <li key={warning}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               <label className="meter-confirmation">
                 <input type="checkbox" required />
-                I checked the available digits against the meter photo.
+                I checked all TOTAL digits against the meter photo.
               </label>
               <button
                 className="primary-button"
                 type="submit"
-                disabled={verifying}
+                disabled={
+                  verifying ||
+                  previewLoading ||
+                  !/^[0-9]{6,18}$/.test(cumulativeTotalDraft.trim())
+                }
               >
                 <AppIcon name="check" size={16} />
-                {verifying ? 'Verifying...' : 'Confirm meter readings'}
+                {verifying ? 'Verifying...' : 'Confirm cumulative total'}
               </button>
               <button
                 className="outline-button"
@@ -1040,10 +1032,6 @@ function FuelForm({
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [meterPhoto, setMeterPhoto] = useState(null);
-  const [manualReadings, setManualReadings] = useState(null);
-  const [manualPreview, setManualPreview] = useState(null);
-  const [manualPreviewError, setManualPreviewError] = useState('');
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [calculatedFillConfirmed, setCalculatedFillConfirmed] = useState(false);
   const [odometer, setOdometer] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1052,18 +1040,10 @@ function FuelForm({
   const transactionFormRef = useRef(null);
   const submissionInProgressRef = useRef(false);
   const activeVehicle = allowVehicleSelection ? selectedVehicle : vehicle;
-  const readingsVerified = Boolean(meterPhoto?.verifiedAt || manualReadings);
+  const readingsVerified = Boolean(meterPhoto?.verifiedAt);
   const isManualEntry = Boolean(
-    manualReadings ||
-      (meterPhoto?.verifiedAt && meterPhoto.readingSource === 'manual')
+    meterPhoto?.verifiedAt && meterPhoto.readingSource === 'manual'
   );
-  const currentFillReading =
-    meterPhoto?.currentFillLitres ??
-    (manualPreview?.fillMilliLitres == null
-      ? manualReadings?.currentFillLitres
-      : manualPreview.fillMilliLitres / 1000);
-  const cumulativeTotalReading =
-    meterPhoto?.cumulativeTotalLitres ?? manualReadings?.cumulativeTotalLitres;
   const activeVehicleDetails = activeVehicle
     ? [activeVehicle.make, activeVehicle.model].filter(Boolean).join(' ')
     : '';
@@ -1072,10 +1052,7 @@ function FuelForm({
     odometer !== '' &&
     Number(odometer) < activeVehicle.lastRecordedOdometerMiles;
   const calculatedFillNeedsConfirmation =
-    (manualPreview?.fillCalculation === 'global_total_difference' ||
-      meterPhoto?.fillCalculation === 'global_total_difference') &&
-    manualPreview?.topCurrentFillMilliLitres == null &&
-    meterPhoto?.topCurrentFillMilliLitres == null &&
+    meterPhoto?.fillCalculation === 'global_total_difference' &&
     !calculatedFillConfirmed;
   useEffect(() => {
     setSelectedVehicle(vehicle);
@@ -1083,33 +1060,6 @@ function FuelForm({
       allowVehicleSelection ? '' : vehicle?.registrationNumber ?? ''
     );
   }, [allowVehicleSelection, vehicle]);
-
-  useEffect(() => {
-    setManualPreview(null);
-    setManualPreviewError('');
-    setCalculatedFillConfirmed(false);
-    if (
-      meterPhoto?.verifiedAt ||
-      !manualReadings ||
-      manualReadings.currentFillRawDigits
-    ) {
-      return undefined;
-    }
-    let active = true;
-    setPreviewLoading(true);
-    previewFuelReading({
-      cumulativeTotalRawDigits: manualReadings.cumulativeTotalRawDigits
-    }).then((preview) => {
-      if (active) setManualPreview(preview);
-    }).catch((error) => {
-      if (active) setManualPreviewError(error.message);
-    }).finally(() => {
-      if (active) setPreviewLoading(false);
-    });
-    return () => {
-      active = false;
-    };
-  }, [manualReadings, meterPhoto]);
 
   useEffect(() => {
     if (!allowVehicleSelection || !suggestionsOpen) return undefined;
@@ -1150,7 +1100,6 @@ function FuelForm({
       setRegistrationSearch(foundVehicle.registrationNumber);
       setSuggestionsOpen(false);
       setMeterPhoto(null);
-      setManualReadings(null);
       setOdometer('');
       setSubmitError('');
       setFlowKey((value) => value + 1);
@@ -1175,10 +1124,6 @@ function FuelForm({
     setMeterPhoto(photo);
   }
 
-  function handleManualReadings(readings) {
-    setManualReadings(readings);
-  }
-
   async function saveFuelRecord(odometerMiles) {
     if (
       !readingsVerified ||
@@ -1192,15 +1137,8 @@ function FuelForm({
     setSubmitError('');
     try {
       const record = await createFuelRecord({
-        ...(meterPhoto?.verifiedAt
-          ? {
-              meterPhotoId: meterPhoto.id,
-              calculatedFillConfirmed
-            }
-          : { ...manualReadings, confirmed: true }),
-        ...(manualPreview?.fillCalculation === 'global_total_difference'
-          ? { calculatedFillConfirmed }
-          : {}),
+        meterPhotoId: meterPhoto.id,
+        calculatedFillConfirmed,
         odometerMiles,
         ...(allowVehicleSelection
           ? { vehicleId: activeVehicle.id }
@@ -1208,8 +1146,6 @@ function FuelForm({
       });
       transactionFormRef.current?.reset();
       setMeterPhoto(null);
-      setManualReadings(null);
-      setManualPreview(null);
       setCalculatedFillConfirmed(false);
       setOdometer('');
       setFlowKey((value) => value + 1);
@@ -1296,7 +1232,6 @@ function FuelForm({
                   ) {
                     setSelectedVehicle(null);
                     setMeterPhoto(null);
-                    setManualReadings(null);
                     setOdometer('');
                     setSubmitError('');
                     setFlowKey((value) => value + 1);
@@ -1361,7 +1296,6 @@ function FuelForm({
           key={flowKey}
           vehicleId={allowVehicleSelection ? activeVehicle.id : null}
           onVerified={handleVerifiedPhoto}
-          onManualReadings={handleManualReadings}
         />
       ) : (
         <div className="notice" role="note">
@@ -1404,7 +1338,7 @@ function FuelForm({
           <p className="transaction-help">
             {readingsVerified
               ? 'Enter the odometer shown on the vehicle dashboard.'
-              : 'Confirm both meter readings above to unlock odometer entry.'}
+              : 'Confirm the cumulative TOTAL above to unlock odometer entry.'}
           </p>
           <label className="odometer-field" htmlFor="currentOdometer">
             <span className="odometer-label">
@@ -1468,106 +1402,55 @@ function FuelForm({
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="fuel" size={14} />
-                <span>Current Fill</span>
+                <span>Fuel dispensed</span>
               </span>
               <strong>
-                {currentFillReading == null
-                  ? manualReadings?.currentFillRawDigits
-                    ? formatRawMeterReading(manualReadings.currentFillRawDigits)
-                    : 'Calculated after comparison'
-                  : meterPhoto?.currentFillMilliLitres != null
-                    ? `${formatMilliLitres(meterPhoto.currentFillMilliLitres)} litres`
-                    : manualPreview?.fillMilliLitres != null
-                      ? `${formatMilliLitres(manualPreview.fillMilliLitres)} litres`
-                      : `${formatCurrentFill(currentFillReading)} litres`}
+                {meterPhoto.currentFillMilliLitres == null
+                  ? 'Not calculable'
+                  : `${formatMilliLitres(meterPhoto.currentFillMilliLitres)} L`}
               </strong>
             </div>
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
-                <span>Cumulative Total</span>
+                <span>Previous accepted cumulative total</span>
               </span>
               <strong>
-                {cumulativeTotalReading == null
-                  ? manualReadings?.cumulativeTotalRawDigits
-                    ? formatRawMeterReading(manualReadings.cumulativeTotalRawDigits)
-                    : 'Not recorded'
-                  : `${formatCumulativeTotal(cumulativeTotalReading)} litres`}
+                {meterPhoto.previousGlobalTotalInteger == null
+                  ? 'Not established'
+                  : `${formatMilliLitres(meterPhoto.previousGlobalTotalInteger)} L`}
               </strong>
             </div>
-          </div>
-        )}
-        {manualPreviewError && (
-          <p className="auth-error" role="alert">{manualPreviewError}</p>
-        )}
-        {previewLoading && <p role="status">Calculating from the global total...</p>}
-        {manualPreview?.warnings?.length > 0 && (
-          <ul className="meter-ocr-warnings" aria-label="Reading preview warnings">
-            {manualPreview.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        )}
-        {manualPreview?.fillCalculation === 'global_total_difference' && (
-          <div className="notice" role="note">
-            <p>
-              Calculated fill: <strong>{(manualPreview.fillMilliLitres / 1000).toFixed(3)} L</strong>
-              {' '}({manualPreview.previousTotalLitres} L previous to{' '}
-              {manualPreview.cumulativeTotalLitres} L current).
-              Confirm this calculated amount before{' '}
-              {isManualEntry ? 'saving the fuel record.' : 'submitting.'}
-            </p>
-            <p>
-              Top-row verification:{' '}
-              {manualPreview.topCurrentFillMilliLitres == null
-                ? 'not provided — confirm the calculated amount below'
-                : `${(manualPreview.topCurrentFillMilliLitres / 1000).toFixed(3)} L`}
-              {manualPreview.topCurrentFillMilliLitres == null
-                ? ''
-                : ` · difference ${((manualPreview.topCurrentFillMilliLitres - manualPreview.fillMilliLitres) / 1000).toFixed(3)} L`}
-            </p>
-            {manualPreview.topCurrentFillMilliLitres == null && (
-              <label className="meter-confirmation">
-                <input
-                  type="checkbox"
-                  checked={calculatedFillConfirmed}
-                  onChange={(event) => {
-                    setCalculatedFillConfirmed(event.target.checked);
-                  }}
-                />
-                I confirm the calculated fill amount.
-              </label>
-            )}
           </div>
         )}
         {meterPhoto?.fillCalculation === 'global_total_difference' && (
           <div className="notice" role="note">
             <p>
-              Calculated fill:{' '}
+              Fuel dispensed:{' '}
               <strong>
-                {meterPhoto.currentFillMilliLitres == null
-                  ? formatCurrentFill(meterPhoto.currentFillLitres)
-                  : formatMilliLitres(meterPhoto.currentFillMilliLitres)} L
+                {formatMilliLitres(meterPhoto.currentFillMilliLitres)} L
               </strong>
-              {' '}from {formatMilliLitres(meterPhoto.previousGlobalTotalInteger)} L to{' '}
+              {' '}from previous TOTAL {formatMilliLitres(meterPhoto.previousGlobalTotalInteger)} L to{' '}
               {formatMilliLitres(meterPhoto.cumulativeTotalInteger)} L.
-              {meterPhoto.topCurrentFillMilliLitres == null
-                ? ` Confirm this amount before ${isManualEntry ? 'saving the fuel record.' : 'submitting.'}`
-                : ' The top-row value is verification evidence only.'}
             </p>
-            {meterPhoto.topCurrentFillMilliLitres == null && (
-              <label className="meter-confirmation">
-                <input
-                  type="checkbox"
-                  checked={calculatedFillConfirmed}
-                  onChange={(event) => {
-                    setCalculatedFillConfirmed(event.target.checked);
-                  }}
-                />
-                I confirm the calculated fill amount.
-              </label>
-            )}
+            <label className="meter-confirmation">
+              <input
+                type="checkbox"
+                checked={calculatedFillConfirmed}
+                onChange={(event) => {
+                  setCalculatedFillConfirmed(event.target.checked);
+                }}
+              />
+              I confirm the calculated fuel amount.
+            </label>
           </div>
+        )}
+        {readingsVerified && meterPhoto?.previousGlobalTotalInteger == null && (
+          <p className="odometer-warning" role="alert">
+            No previous accepted cumulative total is established, so fuel cannot
+            be calculated yet. Ask an authorized administrator to establish the
+            meter baseline.
+          </p>
         )}
         {submitError && <p className="auth-error" role="alert">{submitError}</p>}
         <div className="notice transaction-integrity-note" role="note">
@@ -1576,7 +1459,8 @@ function FuelForm({
         </div>
         {isManualEntry && (
           <p className="manual-save-note">
-            Your manual entry will be saved when you select Save fuel record.
+            Your corrected TOTAL and supporting photo will be saved when you
+            select Save fuel record.
           </p>
         )}
         <button
@@ -1588,8 +1472,7 @@ function FuelForm({
             !odometer.trim() ||
             !Number.isFinite(Number(odometer)) ||
             Number(odometer) < 0 ||
-            previewLoading ||
-            Boolean(manualPreviewError) ||
+            meterPhoto?.previousGlobalTotalInteger == null ||
             calculatedFillNeedsConfirmation ||
             submitting
           }
@@ -1735,14 +1618,14 @@ function WorkflowGuide() {
       <h4 id="workflowGuideTitle">Brusna&apos;s pit stop</h4>
       <FuelMascotScene />
       <p className="mascot-story">
-        Our orange co-pilot is ready to roll. Capture the PIUSI display or enter
-        both readings manually, then enter the odometer.
+        Our orange co-pilot is ready to roll. Capture the PIUSI TOTAL row or
+        enter its digits manually, then enter the odometer.
       </p>
       <div className="workflow-status" role="note">
         <span className="workflow-status-dot" aria-hidden="true" />
         <p>
-          <strong>Check before saving.</strong> The current fill and cumulative total
-          are separate values and must match the PIUSI display.
+          <strong>Check before saving.</strong> Fuel dispensed is calculated
+          from consecutive accepted cumulative TOTAL readings.
         </p>
       </div>
     </aside>
@@ -1800,29 +1683,12 @@ function formatCumulativeTotal(value) {
   });
 }
 
-function formatOcrCurrentFill(photo) {
-  const fill = formatOcrCurrentFillValue(
-    photo.ocrCurrentFillRawDigits,
-    photo.ocrCurrentFillLitres
-  );
-  return fill === 'Not recorded' || fill === 'Needs manual review'
-    ? fill
-    : `${fill} litres`;
-}
-
 function formatOcrCumulativeTotal(photo) {
   if (photo.ocrCumulativeTotalRawDigits) {
-    return `${formatMilliLitres(Number(photo.ocrCumulativeTotalRawDigits))} litres`;
+    return `${formatRawMeterDigitsAsLitres(photo.ocrCumulativeTotalRawDigits)} litres`;
   }
   if (photo.ocrCumulativeTotalLitres == null) return 'Not recorded';
   return `${formatCumulativeTotal(photo.ocrCumulativeTotalLitres)} litres`;
-}
-
-function currentFillDraftValue(photo) {
-  if (photo.ocrCurrentFillRawDigits) {
-    return photo.ocrCurrentFillRawDigits;
-  }
-  return ocrValueToRawDigits(photo.ocrCurrentFillLitres);
 }
 
 function cumulativeTotalDraftValue(photo) {

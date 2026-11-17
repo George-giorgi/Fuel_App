@@ -133,12 +133,23 @@ def assess_meter_readings(
         fill_source = "GLOBAL_DIFFERENCE"
     if fill_milli_litres is None:
         if top_current_fill_milli_litres is None:
-            warnings.append("Fill digits are missing or unreadable.")
+            if delta is not None and delta <= 0:
+                warnings.append(
+                    "Fuel dispensed cannot be calculated from a non-increasing TOTAL reading."
+                )
+            elif previous_total_milli_litres is None:
+                warnings.append(
+                    "Fuel dispensed cannot be calculated until an accepted TOTAL baseline exists."
+                )
+            else:
+                warnings.append(
+                    "Fuel dispensed could not be calculated from the TOTAL readings."
+                )
     elif fill_milli_litres <= 0:
         warnings.append("Fill must be greater than zero.")
     elif fill_milli_litres > MAX_FILL_MILLI_LITRES:
         warnings.append(
-            "Fill exceeds the 100 litre limit; correct the top-row reading."
+            "The calculated fuel amount exceeds the 100 litre plausibility limit; authorized review is required."
         )
     if top_current_fill_milli_litres is not None:
         if top_current_fill_milli_litres <= 0:

@@ -16,7 +16,9 @@ from PIL import Image, ImageFilter, ImageOps
 from backend.app.core.config import METER_OCR_MIN_CONFIDENCE
 from backend.app.services.piusi_lcd import (
     PiusiLcdRecognition,
+    PiusiTotalRecognition,
     recognize_piusi_lcd,
+    recognize_piusi_total,
 )
 
 
@@ -1179,6 +1181,280 @@ def _extract_tesseract_readings(content: bytes) -> MeterOcrResult:
     )
 
 
+def _total_ocr_result(
+    text: str, confidence: float, provider: str
+) -> MeterOcrResult:
+    raw_digits, _ = _raw_digits_and_decimal_position(text)
+    if raw_digits is None:
+        return MeterOcrResult(
+            status="uncertain",
+            provider=provider,
+            cumulative_total_confidence=confidence,
+            message="Google Vision could not read the PIUSI TOTAL row.",
+        )
+
+    warnings = []
+    if len(raw_digits) < 6:
+        warnings.append(
+            "The TOTAL-row OCR returned fewer than six digits; check for missing digits."
+        )
+    cumulative_total = Decimal(raw_digits).scaleb(-3)
+    if confidence < _GOOGLE_VISION_MIN_CONFIDENCE:
+        warnings.append("TOTAL-row OCR confidence is low; confirm every digit.")
+    return MeterOcrResult(
+        status="uncertain" if warnings else "ready",
+        cumulative_total_litres=float(cumulative_total),
+        cumulative_total_confidence=confidence,
+        provider=provider,
+        cumulative_total_raw_digits=raw_digits,
+        cumulative_total_decimal_position=max(0, len(raw_digits) - 3),
+        warnings=tuple(warnings),
+        message="; ".join(warnings) if warnings else None,
+    )
+
+
+def _extract_google_vision_total(
+    api_key: str, lcd: PiusiTotalRecognition
+) -> MeterOcrResult:
+    if not lcd.display_found or lcd.total_row_crop is None:
+        return MeterOcrResult(
+            status="uncertain",
+            provider="google_vision",
+            message="Could not locate the PIUSI TOTAL row; retake a closer photo.",
+        )
+    try:
+        total_content = _prepare_google_vision_detected_image(
+            lcd.total_row_crop,
+            grayscale=True,
+            min_width=_GOOGLE_VISION_TOTAL_ROW_MIN_WIDTH,
+        )
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return MeterOcrResult(
+            status="failed",
+            provider="google_vision",
+            message="Could not prepare the PIUSI TOTAL row for Google Vision.",
+        )
+
+    response_data = _call_google_vision(
+        [total_content],
+        api_key,
+        text_detection_first=True,
+    )
+    if isinstance(response_data, MeterOcrResult):
+        return replace(response_data, provider="google_vision")
+    responses = (
+        response_data.get("responses")
+        if isinstance(response_data, dict)
+        else None
+    )
+    if (
+        not isinstance(responses, list)
+        or not responses
+        or not isinstance(responses[0], dict)
+    ):
+        return MeterOcrResult(
+            status="failed",
+            provider="google_vision",
+            message="Google Vision returned no TOTAL-row OCR response.",
+        )
+
+    response = responses[0]
+    api_error = response.get("error")
+    if isinstance(api_error, dict):
+        message = api_error.get("message", "The OCR request was rejected.")
+        return MeterOcrResult(
+            status="failed",
+            provider="google_vision",
+            message=f"Google Vision error reading the TOTAL row: {message}",
+        )
+
+    readings = _google_vision_response_lines(response)
+    if not readings:
+        return MeterOcrResult(
+            status="uncertain",
+            provider="google_vision",
+            message="Google Vision could not read the PIUSI TOTAL row.",
+        )
+    _, text, confidence = max(
+        readings,
+        key=lambda reading: (
+            len(_raw_digits_and_decimal_position(reading[1])[0] or ""),
+            reading[2],
+        ),
+    )
+    result = _total_ocr_result(text, confidence, "google_vision")
+    document = response.get("fullTextAnnotation")
+    if isinstance(document, dict) and _google_vision_text_detection_disagrees(
+        response, document
+    ):
+        warning = (
+            "Google Vision TEXT_DETECTION and DOCUMENT_TEXT_DETECTION disagree on the TOTAL digits."
+        )
+        return replace(
+            result,
+            status="uncertain",
+            message="; ".join(filter(None, (result.message, warning))),
+            warnings=tuple(dict.fromkeys((*result.warnings, warning))),
+        )
+    return result
+
+
+def _extract_tesseract_total(
+    lcd: PiusiTotalRecognition,
+) -> MeterOcrResult:
+    try:
+        import pytesseract
+        from pytesseract import Output
+        from pytesseract.pytesseract import TesseractError, TesseractNotFoundError
+    except ModuleNotFoundError:
+        return MeterOcrResult(
+            status="unavailable",
+            provider="tesseract",
+            message="Install the local pytesseract package to enable meter OCR.",
+        )
+    if lcd.total_row_crop is None:
+        return MeterOcrResult(
+            status="uncertain",
+            provider="tesseract",
+            message="Could not locate the PIUSI TOTAL row.",
+        )
+
+    pytesseract.pytesseract.tesseract_cmd = _get_tesseract_command()
+    try:
+        with Image.open(BytesIO(lcd.total_row_crop)) as source:
+            row = ImageOps.autocontrast(
+                ImageOps.exif_transpose(source).convert("L"), cutoff=1
+            )
+        width, height = row.size
+        scale = max(1, round(1600 / max(width, 1)))
+        row = row.resize(
+            (width * scale, height * scale),
+            Image.Resampling.LANCZOS,
+        )
+        output = pytesseract.image_to_data(
+            row,
+            config="--psm 7 -c tessedit_char_whitelist=0123456789",
+            output_type=Output.DICT,
+        )
+    except TesseractNotFoundError:
+        return MeterOcrResult(
+            status="unavailable",
+            provider="tesseract",
+            message="The local Tesseract executable is not installed or is not on PATH.",
+        )
+    except TesseractError as error:
+        return MeterOcrResult(
+            status="failed",
+            provider="tesseract",
+            message=f"Local Tesseract OCR failed: {error}",
+        )
+
+    words = [
+        (str(text).strip(), float(confidence))
+        for text, confidence in zip(output.get("text", []), output.get("conf", []))
+        if str(text).strip() and str(text).strip().isdigit()
+    ]
+    if not words:
+        return MeterOcrResult(
+            status="uncertain",
+            provider="tesseract",
+            message="Tesseract could not read the PIUSI TOTAL row.",
+        )
+    text = "".join(word for word, _ in words)
+    confidence = sum(score for _, score in words) / len(words)
+    return _total_ocr_result(text, confidence, "tesseract")
+
+
+def _apply_piusi_total_evidence(
+    result: MeterOcrResult,
+    lcd: PiusiTotalRecognition,
+    provider: str,
+) -> MeterOcrResult:
+    warnings = list(result.warnings) + list(lcd.warnings)
+    if not lcd.display_found:
+        return replace(
+            result,
+            status="uncertain",
+            provider=provider,
+            message="Could not locate the PIUSI display; retake a closer photo.",
+            warnings=tuple(dict.fromkeys(warnings)),
+        )
+
+    vision_digits = result.cumulative_total_raw_digits
+    segment = lcd.cumulative_total
+    chosen_digits = vision_digits or segment.raw_digits
+    if vision_digits is None and segment.raw_digits is not None:
+        warnings.append(
+            "Google Vision did not return TOTAL digits; the OpenCV candidate needs manual confirmation."
+        )
+    if segment.raw_digits is None:
+        warnings.append("OpenCV could not verify all TOTAL-row digits.")
+    elif vision_digits is not None and vision_digits != segment.raw_digits:
+        warnings.append(
+            "Google Vision and OpenCV disagree on the TOTAL-row digits; manual review is required."
+        )
+    if chosen_digits is not None and len(chosen_digits) < 6:
+        warnings.append(
+            "The TOTAL reading has fewer than six digits; check for missing digits."
+        )
+    if chosen_digits is not None and len(chosen_digits) > 18:
+        warnings.append("The TOTAL reading has extra or unsupported digits.")
+        chosen_digits = None
+
+    chosen_value = (
+        Decimal(chosen_digits).scaleb(-3)
+        if chosen_digits is not None
+        else None
+    )
+    confidence = (
+        result.cumulative_total_confidence
+        if vision_digits is not None
+        else None
+    )
+    if segment.raw_digits is not None and segment.confidence is not None:
+        if segment.confidence < 0.55:
+            warnings.append("OpenCV TOTAL-row confidence is low.")
+    if vision_digits is None and segment.raw_digits is None:
+        warnings.append("No TOTAL-row digits could be read.")
+
+    warnings = list(dict.fromkeys(warnings))
+    ready = (
+        vision_digits is not None
+        and segment.raw_digits == vision_digits
+        and len(vision_digits) >= 6
+        and len(vision_digits) <= 18
+        and (confidence or 0) >= _GOOGLE_VISION_MIN_CONFIDENCE
+        and (segment.confidence or 0) >= 0.55
+        and not warnings
+    )
+    message = "; ".join(warnings) if warnings else result.message
+    return MeterOcrResult(
+        status=(
+            "ready"
+            if ready
+            else result.status
+            if result.status in {"failed", "unavailable"}
+            else "uncertain"
+        ),
+        cumulative_total_litres=(
+            float(chosen_value) if chosen_value is not None else None
+        ),
+        cumulative_total_confidence=confidence,
+        message=message,
+        provider=provider,
+        cumulative_total_raw_digits=chosen_digits,
+        cumulative_total_decimal_position=(
+            max(0, len(chosen_digits) - 3)
+            if chosen_digits is not None
+            else None
+        ),
+        cumulative_total_segment_confidence=(
+            segment.confidence * 100 if segment.confidence is not None else None
+        ),
+        warnings=tuple(warnings),
+    )
+
+
 def _apply_piusi_evidence(
     result: MeterOcrResult,
     lcd: PiusiLcdRecognition,
@@ -1317,40 +1593,23 @@ def extract_meter_readings(content: bytes) -> MeterOcrResult:
         else "tesseract"
     )
     provider = os.environ.get("FUEL_OCR_PROVIDER", default_provider).strip().lower()
-    if provider == "google_vision":
-        if not vision_api_key:
-            return MeterOcrResult(
-                status="unavailable",
-                provider=provider,
-                message=(
-                    "Google Vision is selected, but "
-                    "GOOGLE_CLOUD_VISION_API_KEY is not configured."
-                ),
-            )
-        try:
-            lcd = recognize_piusi_lcd(content)
-        except (
-            OSError,
-            ValueError,
-            Image.DecompressionBombError,
-            cv2.error,
-        ) as error:
-            return MeterOcrResult(
-                status="failed",
-                provider=provider,
-                message=f"Could not process the uploaded meter photo: {error}",
-            )
-        result = _extract_google_vision_readings(content, vision_api_key, lcd)
-        return _apply_piusi_evidence(result, lcd, provider)
-    if provider != "tesseract":
+    if provider not in {"google_vision", "tesseract"}:
         return MeterOcrResult(
             status="failed",
             provider=provider,
             message=f"Unsupported OCR provider: {provider}.",
         )
-    result = _extract_tesseract_readings(content)
+    if provider == "google_vision" and not vision_api_key:
+        return MeterOcrResult(
+            status="unavailable",
+            provider=provider,
+            message=(
+                "Google Vision is selected, but "
+                "GOOGLE_CLOUD_VISION_API_KEY is not configured."
+            ),
+        )
     try:
-        lcd = recognize_piusi_lcd(content)
+        lcd = recognize_piusi_total(content)
     except (
         OSError,
         ValueError,
@@ -1362,4 +1621,8 @@ def extract_meter_readings(content: bytes) -> MeterOcrResult:
             provider=provider,
             message=f"Could not process the uploaded meter photo: {error}",
         )
-    return _apply_piusi_evidence(result, lcd, provider)
+    if provider == "google_vision":
+        result = _extract_google_vision_total(vision_api_key, lcd)
+    else:
+        result = _extract_tesseract_total(lcd)
+    return _apply_piusi_total_evidence(result, lcd, provider)

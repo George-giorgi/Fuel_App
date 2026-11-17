@@ -487,7 +487,7 @@ class DatabaseTests(unittest.TestCase):
                             ),
                             cumulative_total_raw_digits=str(
                                 int(Decimal(str(cumulative_total)) * 1000)
-                            ),
+                            ).zfill(6),
                         ),
                 ),
             ):
@@ -505,12 +505,6 @@ class DatabaseTests(unittest.TestCase):
                 self.assertEqual(
                     photo.ocr_status,
                     ocr_result.status if ocr_result is not None else "ready",
-                )
-                self.assertEqual(
-                    photo.ocr_current_fill_litres,
-                    ocr_result.current_fill_litres
-                    if ocr_result is not None
-                    else int(Decimal(str(current_fill)) * 1000),
                 )
                 self.assertEqual(
                     photo.ocr_cumulative_total_litres,
@@ -1884,9 +1878,9 @@ class DatabaseTests(unittest.TestCase):
 
             request = FuelRecordCreate.model_validate(
                 {
-                    "currentFillLitres": "10",
                     "cumulativeTotalLitres": "100",
                     "confirmed": True,
+                    "calculatedFillConfirmed": True,
                     "odometerMiles": 1000,
                 }
             )
@@ -1914,19 +1908,14 @@ class DatabaseTests(unittest.TestCase):
         self,
     ) -> None:
         for readings in (
-            {"current_fill_litres": Decimal("10"), "confirmed": True},
             {
-                "current_fill_litres": Decimal("10"),
                 "cumulative_total_litres": Decimal("100"),
+                "confirmed": False,
             },
+            {"cumulative_total_litres": Decimal("100.1234"), "confirmed": True},
             {
-                "current_fill_litres": Decimal("10.1234"),
                 "cumulative_total_litres": Decimal("100"),
-                "confirmed": True,
-            },
-            {
-                "current_fill_litres": Decimal("10"),
-                "cumulative_total_litres": Decimal("100.1234"),
+                "cumulative_total_raw_digits": "100000",
                 "confirmed": True,
             },
         ):
@@ -2011,7 +2000,7 @@ class DatabaseTests(unittest.TestCase):
                             current_fill_confidence=99,
                             cumulative_total_confidence=99,
                             current_fill_raw_digits="10000",
-                            cumulative_total_raw_digits="10000",
+                            cumulative_total_raw_digits="010000",
                         ),
                     ),
                 ):
@@ -2395,7 +2384,7 @@ class DatabaseTests(unittest.TestCase):
         self.assertAlmostEqual(recent_record["currentFillLitres"], 12.345)
         self.assertEqual(recent_record["cumulativeTotalInteger"], 1234)
 
-    def test_uncertain_ocr_requires_manual_confirmation_of_both_values(self) -> None:
+    def test_uncertain_ocr_requires_manual_confirmation_of_total_only(self) -> None:
         with Session(self.engine) as session, session.begin():
             employee = create_employee(
                 session, "uncertain@example.test", "Uncertain Worker", "temporary-password"
@@ -2424,7 +2413,7 @@ class DatabaseTests(unittest.TestCase):
                     {
                         "confirmed": True,
                         "currentFillRawDigits": "75x",
-                        "cumulativeTotalRawDigits": "107",
+                        "cumulativeTotalRawDigits": "107000",
                     }
                 )
             with self.assertRaises(InvalidMeterVerification):
@@ -2432,26 +2421,24 @@ class DatabaseTests(unittest.TestCase):
                     session,
                     employee,
                     photo.id,
-                    Decimal("75.5"),
                     Decimal("107.1234"),
                 )
             request = MeterPhotoVerify.model_validate(
                 {
                     "confirmed": True,
-                    "currentFillLitres": "75.5",
-                    "cumulativeTotalLitres": "107",
+                    "cumulativeTotalRawDigits": "107000",
                 }
             )
             verified = verify_meter_photo(
                 session,
                 employee,
                 photo.id,
-                request.current_fill_litres,
                 request.cumulative_total_litres,
+                request.cumulative_total_raw_digits,
             )
             self.assertIsNone(verified.current_fill_litres)
-            self.assertEqual(verified.top_current_fill_milli_litres, 75500)
             self.assertEqual(verified.cumulative_total_litres, 107.0)
+            self.assertIsNone(verified.top_current_fill_milli_litres)
             self.assertEqual(verified.verification_method, "MANUAL")
             with self.assertRaises(ValueError):
                 FuelRecordCreate.model_validate(
@@ -2467,7 +2454,7 @@ class DatabaseTests(unittest.TestCase):
                     {"meterPhotoId": photo.id, "odometerKm": 1000}
                 )
 
-    def test_ocr_fill_raw_digits_preserve_exact_thousandths(
+    def test_new_photo_ocr_does_not_store_current_fill_evidence(
         self,
     ) -> None:
         with Session(self.engine) as session, session.begin():
@@ -2487,13 +2474,13 @@ class DatabaseTests(unittest.TestCase):
                 261563,
                 verify=False,
             )
-            photo.ocr_current_fill_litres = 22032
-            photo.ocr_current_fill_raw_digits = "22032"
             verified = verify_meter_photo(session, employee, photo.id)
 
             self.assertIsNone(verified.current_fill_milli_litres)
-            self.assertEqual(verified.top_current_fill_milli_litres, 22032)
             self.assertIsNone(verified.current_fill_litres)
+            self.assertIsNone(verified.top_current_fill_milli_litres)
+            self.assertIsNone(verified.ocr_current_fill_litres)
+            self.assertIsNone(verified.ocr_current_fill_raw_digits)
             self.assertEqual(verified.verification_method, "OPENCV")
 
     def test_ocr_total_raw_digits_are_stored_as_a_whole_integer(
@@ -2524,7 +2511,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(verified.cumulative_total_litres, 261.563)
             self.assertEqual(verified.cumulative_total_raw_digits, "261563")
 
-    def test_manual_readings_warn_for_capacity_and_lower_total_without_rejecting(
+    def test_manual_total_warns_for_decrease_without_advancing_total(
         self,
     ) -> None:
         with Session(self.engine) as session, session.begin():
@@ -2559,21 +2546,16 @@ class DatabaseTests(unittest.TestCase):
                 session,
                 employee,
                 photo.id,
-                Decimal("60"),
-                Decimal("90"),
+                cumulative_total_raw_digits="090000",
             )
 
             self.assertIsNotNone(verified.verified_at)
             self.assertIsNone(verified.current_fill_litres)
-            self.assertEqual(verified.top_current_fill_milli_litres, 60000)
             self.assertEqual(verified.cumulative_total_litres, 90)
-            self.assertTrue(
-                any("tank capacity" in warning for warning in verified.ocr_warnings)
-            )
             self.assertTrue(
                 any(
                     "decreased" in warning
-                    for warning in verified.ocr_warnings
+                    for warning in verified.reading_warnings
                 )
             )
 

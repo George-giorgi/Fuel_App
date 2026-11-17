@@ -1,6 +1,17 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, JSON, String, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db.base import Base
@@ -106,4 +117,8 @@ class MeterPhoto(Base):
     fill_calculation: Mapped[str | None] = mapped_column(String(24), nullable=True)
     reconciliation_status: Mapped[str | None] = mapped_column(
         String(24), nullable=True
+    )
+    reading_warnings: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    cumulative_total_manually_corrected: Mapped[bool | None] = mapped_column(
+        Boolean, nullable=True
     )

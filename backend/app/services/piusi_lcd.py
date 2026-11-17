@@ -53,6 +53,15 @@ class PiusiLcdRecognition:
     warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class PiusiTotalRecognition:
+    display_found: bool
+    cumulative_total: LcdRowReading
+    display_crop: bytes | None
+    total_row_crop: bytes | None
+    warnings: tuple[str, ...] = ()
+
+
 def _encode_jpeg(image: np.ndarray) -> bytes:
     success, encoded = cv2.imencode(
         ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 96]
@@ -633,5 +642,66 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
         _encode_jpeg(display),
         _encode_jpeg(current_row),
         _encode_jpeg(total_row),
+        tuple(warnings),
+    )
+
+
+def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
+    image = _load_oriented_image(content)
+    display = _lcd_candidate(image)
+    if display is None:
+        display = _lcd_candidate(image, saturation_floor=25)
+    if display is None:
+        missing = LcdRowReading(None, None, None, None)
+        return PiusiTotalRecognition(
+            False,
+            missing,
+            None,
+            None,
+            ("Could not locate the PIUSI LCD display.",),
+        )
+
+    height, width = display.shape[:2]
+    bounds = (0.15, 0.65, 0.95, 0.96)
+    total_row = display[
+        round(height * bounds[1]) : round(height * bounds[3]),
+        round(width * bounds[0]) : round(width * bounds[2]),
+    ]
+    total = _recognize_row(
+        display,
+        bounds,
+        minimum_digits=4,
+        split_wide_glyphs=True,
+        segment_threshold=0.45,
+        whole_number=True,
+        mask_right_fraction=0.71,
+    )
+    warnings = []
+    if total.raw_digits is None or height <= 100:
+        alternative, crop, ambiguous = _search_row_windows(
+            display, total_row=True
+        )
+        if alternative is not None:
+            if (
+                total.raw_digits is not None
+                and total.raw_digits != alternative.raw_digits
+            ):
+                warnings.append(
+                    "Primary and alternate TOTAL-row crops disagree; manual review is required."
+                )
+            total = alternative
+            if crop is not None:
+                total_row = crop
+            if ambiguous:
+                warnings.append(
+                    "Alternate TOTAL-row crops disagree; manual review is required."
+                )
+    if total.raw_digits is None:
+        warnings.append("Seven-segment recognition could not read the TOTAL row.")
+    return PiusiTotalRecognition(
+        True,
+        total,
+        _encode_jpeg(display),
+        _encode_jpeg(total_row) if total_row.size else None,
         tuple(warnings),
     )

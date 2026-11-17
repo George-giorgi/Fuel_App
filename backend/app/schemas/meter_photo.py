@@ -43,25 +43,20 @@ class MeterPhotoRead(BaseModel):
     uploaded_at: datetime
     registration_number: str
     ocr_status: str
-    ocr_current_fill_litres: float | None
     ocr_cumulative_total_litres: float | None
-    ocr_current_fill_confidence: float | None
     ocr_cumulative_total_confidence: float | None
     ocr_provider: str | None
-    ocr_current_fill_raw_digits: str | None
-    ocr_current_fill_decimal_position: int | None
     ocr_cumulative_total_raw_digits: str | None
     ocr_cumulative_total_decimal_position: int | None
-    ocr_current_fill_segment_confidence: float | None
     ocr_cumulative_total_segment_confidence: float | None
     ocr_warnings: list[str] | None
+    reading_warnings: list[str] | None = None
+    cumulative_total_manually_corrected: bool | None = None
     current_fill_litres: float | None
     cumulative_total_litres: float | None
     current_fill_milli_litres: int | None = None
-    top_current_fill_milli_litres: int | None = None
     cumulative_total_integer: int | None = None
     previous_global_total_integer: int | None = None
-    current_fill_raw_digits: str | None = None
     cumulative_total_raw_digits: str | None = None
     reading_source: str | None = None
     fill_source: str | None = None
@@ -80,40 +75,25 @@ class MeterPhotoVerify(BaseModel):
     )
 
     confirmed: bool
-    current_fill_litres: Decimal | None = Field(default=None, ge=0)
     cumulative_total_litres: Decimal | None = Field(
         default=None, ge=0, decimal_places=3
     )
-    current_fill_raw_digits: str | None = Field(default=None, max_length=32)
-    cumulative_total_raw_digits: str | None = Field(default=None, max_length=32)
+    cumulative_total_raw_digits: str | None = Field(
+        default=None, min_length=6, max_length=18
+    )
 
     @model_validator(mode="after")
     def require_confirmation(self) -> "MeterPhotoVerify":
         if not self.confirmed:
             raise ValueError("Confirm the entered meter readings before saving.")
+        if self.cumulative_total_litres is not None and self.cumulative_total_raw_digits is not None:
+            raise ValueError("Provide raw digits or a legacy numeric reading, not both.")
         if (
-            self.current_fill_litres is not None
-            and self.current_fill_raw_digits is not None
-        ) or (
-            self.cumulative_total_litres is not None
-            and self.cumulative_total_raw_digits is not None
-        ):
-            raise ValueError("Provide raw digits or legacy numeric readings, not both.")
-        if (
-            self.current_fill_litres is not None
-            and not self.current_fill_litres.is_finite()
-        ) or (
             self.cumulative_total_litres is not None
             and not self.cumulative_total_litres.is_finite()
         ):
             raise ValueError("Meter readings must be finite numbers.")
-        for field_name in (
-            "current_fill_raw_digits",
-            "cumulative_total_raw_digits",
-        ):
-            value = getattr(self, field_name)
-            if value is not None and (
-                not value.isascii() or not value.isdigit()
-            ):
-                raise ValueError(f"{field_name} must contain digits only.")
+        value = self.cumulative_total_raw_digits
+        if value is not None and (not value.isascii() or not value.isdigit()):
+            raise ValueError("cumulative_total_raw_digits must contain digits only.")
         return self

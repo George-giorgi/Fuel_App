@@ -197,9 +197,7 @@ def confirm_meter_readings(
             session,
             employee,
             meter_photo_id,
-            request.current_fill_litres,
             request.cumulative_total_litres,
-            request.current_fill_raw_digits,
             request.cumulative_total_raw_digits,
         )
     except InvalidMeterVerification as error:
@@ -223,34 +221,28 @@ def _meter_photo_read(
         uploaded_at=meter_photo.uploaded_at,
         registration_number=registration_number,
         ocr_status=meter_photo.ocr_status,
-        ocr_current_fill_litres=meter_photo.ocr_current_fill_litres,
         ocr_cumulative_total_litres=meter_photo.ocr_cumulative_total_litres,
-        ocr_current_fill_confidence=meter_photo.ocr_current_fill_confidence,
         ocr_cumulative_total_confidence=meter_photo.ocr_cumulative_total_confidence,
         ocr_provider=meter_photo.ocr_provider,
-        ocr_current_fill_raw_digits=meter_photo.ocr_current_fill_raw_digits,
-        ocr_current_fill_decimal_position=(
-            meter_photo.ocr_current_fill_decimal_position
-        ),
         ocr_cumulative_total_raw_digits=(
             meter_photo.ocr_cumulative_total_raw_digits
         ),
         ocr_cumulative_total_decimal_position=(
             meter_photo.ocr_cumulative_total_decimal_position
         ),
-        ocr_current_fill_segment_confidence=(
-            meter_photo.ocr_current_fill_segment_confidence
-        ),
         ocr_cumulative_total_segment_confidence=(
             meter_photo.ocr_cumulative_total_segment_confidence
         ),
         ocr_warnings=meter_photo.ocr_warnings,
+        reading_warnings=meter_photo.reading_warnings,
+        cumulative_total_manually_corrected=(
+            meter_photo.cumulative_total_manually_corrected
+        ),
         current_fill_litres=meter_photo.current_fill_litres,
         cumulative_total_litres=meter_photo.cumulative_total_litres,
         current_fill_milli_litres=meter_photo.current_fill_milli_litres,
         cumulative_total_integer=meter_photo.cumulative_total_integer,
         previous_global_total_integer=meter_photo.previous_global_total_integer,
-        current_fill_raw_digits=meter_photo.current_fill_raw_digits,
         cumulative_total_raw_digits=meter_photo.cumulative_total_raw_digits,
         reading_source=meter_photo.reading_source,
         fill_calculation=meter_photo.fill_calculation,

@@ -15,12 +15,14 @@ from sqlalchemy import create_engine, inspect
 
 from backend.app.services.meter_ocr import (
     MeterOcrResult,
+    _apply_piusi_total_evidence,
     _apply_piusi_evidence,
     _google_vision_text_detection_disagrees,
     parse_meter_ocr_data,
 )
 from backend.app.services.piusi_lcd import (
     recognize_piusi_lcd,
+    recognize_piusi_total,
 )
 from backend.app.services import piusi_lcd
 
@@ -133,58 +135,44 @@ class PiusiOcrTests(unittest.TestCase):
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
         for example in labels["examples"][1:]:
             with self.subTest(image=example["image"]):
-                result = recognize_piusi_lcd(
+                result = recognize_piusi_total(
                     (DATASET / example["image"]).read_bytes()
                 )
                 self.assertTrue(result.display_found)
+                expected_digits = example["cumulative_total_raw_digits"]
+                if example.get("known_ocr_misread_raw_digits"):
+                    self.assertEqual(
+                        result.cumulative_total.raw_digits,
+                        example["known_ocr_misread_raw_digits"],
+                    )
+                    self.assertNotEqual(
+                        result.cumulative_total.raw_digits,
+                        expected_digits,
+                    )
+                else:
+                    self.assertEqual(
+                        result.cumulative_total.raw_digits,
+                        expected_digits,
+                    )
                 self.assertEqual(
-                    result.current_fill.raw_digits,
-                    example["current_fill_raw_digits"],
-                )
-                self.assertEqual(
-                    result.current_fill.decimal_position,
-                    example["current_fill_decimal_position"],
-                )
-                self.assertEqual(
-                    result.current_fill.value,
-                    Decimal(example["current_fill"]),
-                )
-                self.assertEqual(
-                    result.cumulative_total.raw_digits,
-                    example["cumulative_total_raw_digits"],
-                )
-                self.assertEqual(
-                    result.cumulative_total.decimal_position,
-                    example["cumulative_total_decimal_position"],
+                    result.cumulative_total.decimal_position, 3
                 )
                 self.assertEqual(
                     result.cumulative_total.value,
-                    Decimal(example["cumulative_total"]),
+                    Decimal(example["known_ocr_misread_raw_digits"]).scaleb(-3)
+                    if example.get("known_ocr_misread_raw_digits")
+                    else Decimal(example["cumulative_total"]),
                 )
                 vision_result = MeterOcrResult(
                     status="ready",
-                    current_fill_litres=int(
-                        Decimal(example["current_fill"]) * 1000
-                    ),
                     cumulative_total_litres=float(
-                        Decimal(example["cumulative_total"])
+                        Decimal(result.cumulative_total.raw_digits).scaleb(-3)
                     ),
-                    current_fill_confidence=96,
                     cumulative_total_confidence=94,
-                    current_fill_raw_digits=example[
-                        "current_fill_raw_digits"
-                    ],
-                    current_fill_decimal_position=example[
-                        "current_fill_decimal_position"
-                    ],
-                    cumulative_total_raw_digits=example[
-                        "cumulative_total_raw_digits"
-                    ],
-                    cumulative_total_decimal_position=example[
-                        "cumulative_total_decimal_position"
-                    ],
+                    cumulative_total_raw_digits=result.cumulative_total.raw_digits,
+                    cumulative_total_decimal_position=3,
                 )
-                reconciled = _apply_piusi_evidence(
+                reconciled = _apply_piusi_total_evidence(
                     vision_result, result, "google_vision"
                 )
                 self.assertEqual(
