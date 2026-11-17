@@ -494,10 +494,11 @@ def _search_row_windows(
                     reading = _recognize_row(
                         scaled_display,
                         bounds,
-                        minimum_digits=4 if total_row else 3,
+                        minimum_digits=6 if total_row else 3,
                         split_wide_glyphs=total_row,
                         segment_threshold=0.45 if total_row else 0.35,
                         whole_number=True,
+                        expected_digits=6 if total_row else None,
                         mask_right_fraction=0.71 if total_row else None,
                         adaptive_masks=True,
                         minimum_agreeing_masks=2,
@@ -584,10 +585,11 @@ def recognize_piusi_lcd(content: bytes) -> PiusiLcdRecognition:
     total = _recognize_row(
         display,
         (0.15, 0.65, 0.95, 0.96),
-        minimum_digits=4,
+        minimum_digits=6,
         split_wide_glyphs=True,
         segment_threshold=0.45,
         whole_number=True,
+        expected_digits=6,
         mask_right_fraction=0.71,
     )
     warnings = []
@@ -670,10 +672,11 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
     total = _recognize_row(
         display,
         bounds,
-        minimum_digits=4,
+        minimum_digits=6,
         split_wide_glyphs=True,
         segment_threshold=0.45,
         whole_number=True,
+        expected_digits=6,
         mask_right_fraction=0.71,
     )
     warnings = []

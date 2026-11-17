@@ -1918,6 +1918,14 @@ class DatabaseTests(unittest.TestCase):
                 "cumulative_total_raw_digits": "100000",
                 "confirmed": True,
             },
+            {
+                "cumulative_total_raw_digits": "26156",
+                "confirmed": True,
+            },
+            {
+                "cumulative_total_raw_digits": "2615630",
+                "confirmed": True,
+            },
         ):
             with self.subTest(readings=readings):
                 with self.assertRaises(ValidationError):
@@ -2163,7 +2171,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertTrue(
                 any(
                     "decreased" in warning
-                    for warning in lower_photo.ocr_warnings
+                    for warning in lower_photo.reading_warnings
                 )
             )
             lower_record = save_fuel_record(
@@ -2217,7 +2225,7 @@ class DatabaseTests(unittest.TestCase):
             )
 
         self.assertEqual(event_type, "replacement")
-        self.assertEqual(values, (0.0, 2.0, None, 2.0, "matched"))
+        self.assertEqual(values, (0.0, 2.0, None, 2.0, "calculated"))
         with Session(self.engine) as session:
             persisted_event = session.get(GlobalMeterEvent, event_id)
         self.assertIsNotNone(persisted_event)
@@ -2471,7 +2479,7 @@ class DatabaseTests(unittest.TestCase):
                 employee,
                 vehicle,
                 22032,
-                261563,
+                261.563,
                 verify=False,
             )
             verified = verify_meter_photo(session, employee, photo.id)
@@ -2742,7 +2750,9 @@ class DatabaseTests(unittest.TestCase):
             employee_vehicle.model_dump(),
         )
 
-    def test_meter_discrepancy_and_decrease_wait_for_admin_review(self) -> None:
+    def test_total_delta_is_calculated_and_decrease_waits_for_admin_review(
+        self,
+    ) -> None:
         with Session(self.engine) as session, session.begin():
             employee = create_employee(
                 session, "reset@example.test", "Reset Worker", "temporary-password"
@@ -2781,7 +2791,7 @@ class DatabaseTests(unittest.TestCase):
             mismatch_photo = self._create_verified_meter_photo(
                 session, employee, vehicle, 3.0, 110.0
             )
-            mismatch = save_fuel_record(
+            next_record = save_fuel_record(
                 session,
                 employee,
                 FuelRecordCreate(
@@ -2789,27 +2799,13 @@ class DatabaseTests(unittest.TestCase):
                     odometer_miles=1100,
                 ),
             )
-            self.assertIsInstance(mismatch, MeterReadingReview)
-            self.assertTrue(mismatch.warnings)
+            self.assertIsInstance(next_record, FuelRecord)
+            self.assertEqual(next_record.meter_delta_litres, 10.0)
             summary = get_admin_fuel_summary(session)
             self.assertEqual(
                 [item["id"] for item in summary["recent_records"]],
-                [first_record.id],
+                [next_record.id, first_record.id],
             )
-            self.assertEqual(
-                get_or_create_global_meter_state(session).current_total_integer,
-                100_000,
-            )
-
-            approved = decide_meter_reading_review(
-                session,
-                admin,
-                mismatch.id,
-                "approve",
-                "Reviewed the original image and confirmed the total difference.",
-            )
-            self.assertEqual(approved.status, "approved")
-            self.assertIsNotNone(approved.fuel_record_id)
             self.assertEqual(
                 get_or_create_global_meter_state(session).current_total_integer,
                 110_000,
@@ -2866,7 +2862,7 @@ class DatabaseTests(unittest.TestCase):
             event_type = event.event_type
 
         self.assertEqual(event_type, "reset")
-        self.assertEqual(reset_values, (0, 2.0, "matched"))
+        self.assertEqual(reset_values, (0, 2.0, "calculated"))
 
     def test_employee_cannot_submit_another_employees_meter_photo(self) -> None:
         with Session(self.engine) as session, session.begin():

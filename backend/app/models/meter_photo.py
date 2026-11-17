@@ -69,6 +69,9 @@ class MeterPhoto(Base):
     ocr_cumulative_total_raw_digits: Mapped[str | None] = mapped_column(
         String(32), nullable=True
     )
+    ocr_cumulative_total_segment_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
     ocr_cumulative_total_decimal_position: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
@@ -110,6 +113,9 @@ class MeterPhoto(Base):
         String(32), nullable=True
     )
     cumulative_total_raw_digits: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    suggested_cumulative_total_raw_digits: Mapped[str | None] = mapped_column(
         String(32), nullable=True
     )
     reading_source: Mapped[str | None] = mapped_column(String(24), nullable=True)

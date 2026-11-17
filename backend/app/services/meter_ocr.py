@@ -55,6 +55,8 @@ class MeterOcrResult:
     cumulative_total_decimal_position: int | None = None
     current_fill_segment_confidence: float | None = None
     cumulative_total_segment_confidence: float | None = None
+    cumulative_total_segment_raw_digits: str | None = None
+    cumulative_total_suggested_raw_digits: str | None = None
     warnings: tuple[str, ...] = ()
 
 
@@ -1194,9 +1196,9 @@ def _total_ocr_result(
         )
 
     warnings = []
-    if len(raw_digits) < 6:
+    if len(raw_digits) != 6:
         warnings.append(
-            "The TOTAL-row OCR returned fewer than six digits; check for missing digits."
+            "The TOTAL-row OCR must return exactly six digits; check for missing or extra digits."
         )
     cumulative_total = Decimal(raw_digits).scaleb(-3)
     if confidence < _GOOGLE_VISION_MIN_CONFIDENCE:
@@ -1275,6 +1277,11 @@ def _extract_google_vision_total(
             provider="google_vision",
             message="Google Vision could not read the PIUSI TOTAL row.",
         )
+    candidate_digits: set[str] = set()
+    for _, candidate_text, _ in readings:
+        digits, _ = _raw_digits_and_decimal_position(candidate_text)
+        if digits is not None:
+            candidate_digits.add(digits)
     _, text, confidence = max(
         readings,
         key=lambda reading: (
@@ -1283,6 +1290,17 @@ def _extract_google_vision_total(
         ),
     )
     result = _total_ocr_result(text, confidence, "google_vision")
+    if len(candidate_digits) > 1:
+        warning = (
+            "Google Vision found conflicting TOTAL-row digit sequences "
+            f"({', '.join(sorted(candidate_digits))}); manual review is required."
+        )
+        result = replace(
+            result,
+            status="uncertain",
+            message="; ".join(filter(None, (result.message, warning))),
+            warnings=tuple(dict.fromkeys((*result.warnings, warning))),
+        )
     document = response.get("fullTextAnnotation")
     if isinstance(document, dict) and _google_vision_text_detection_disagrees(
         response, document
@@ -1380,50 +1398,60 @@ def _apply_piusi_total_evidence(
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
-    vision_digits = result.cumulative_total_raw_digits
+    ocr_digits = result.cumulative_total_raw_digits
+    ocr_digits_supported = ocr_digits is None or len(ocr_digits) <= 18
     segment = lcd.cumulative_total
-    chosen_digits = vision_digits or segment.raw_digits
-    if vision_digits is None and segment.raw_digits is not None:
+    segment_digits = segment.raw_digits
+    suggested_digits = None
+    if ocr_digits is None and segment_digits is not None:
         warnings.append(
             "Google Vision did not return TOTAL digits; the OpenCV candidate needs manual confirmation."
         )
-    if segment.raw_digits is None:
+    if segment_digits is None:
         warnings.append("OpenCV could not verify all TOTAL-row digits.")
-    elif vision_digits is not None and vision_digits != segment.raw_digits:
+    elif ocr_digits is not None and ocr_digits != segment_digits:
         warnings.append(
             "Google Vision and OpenCV disagree on the TOTAL-row digits; manual review is required."
         )
-    if chosen_digits is not None and len(chosen_digits) < 6:
+    if ocr_digits is not None and len(ocr_digits) != 6:
         warnings.append(
-            "The TOTAL reading has fewer than six digits; check for missing digits."
+            "The TOTAL reading must contain exactly six digits; check for missing or extra digits."
         )
-    if chosen_digits is not None and len(chosen_digits) > 18:
-        warnings.append("The TOTAL reading has extra or unsupported digits.")
-        chosen_digits = None
 
-    chosen_value = (
-        Decimal(chosen_digits).scaleb(-3)
-        if chosen_digits is not None
-        else None
+    ocr_is_complete = (
+        ocr_digits is not None and ocr_digits_supported and len(ocr_digits) == 6
     )
-    confidence = (
-        result.cumulative_total_confidence
-        if vision_digits is not None
-        else None
-    )
-    if segment.raw_digits is not None and segment.confidence is not None:
+    segment_is_complete = segment_digits is not None and len(segment_digits) == 6
+    if segment_digits is not None and not segment_is_complete:
+        warnings.append(
+            "OpenCV must return exactly six TOTAL-row digits; check for missing or extra digits."
+        )
+    if ocr_is_complete and segment_is_complete:
+        if ocr_digits == segment_digits:
+            suggested_digits = ocr_digits
+    elif ocr_is_complete:
+        suggested_digits = ocr_digits
+    elif (
+        segment_is_complete
+        and segment.confidence is not None
+        and segment.confidence >= 0.75
+    ):
+        suggested_digits = segment_digits
+
+    if segment_digits is not None and segment.confidence is not None:
         if segment.confidence < 0.55:
             warnings.append("OpenCV TOTAL-row confidence is low.")
-    if vision_digits is None and segment.raw_digits is None:
+    if ocr_digits is None and segment_digits is None:
         warnings.append("No TOTAL-row digits could be read.")
 
     warnings = list(dict.fromkeys(warnings))
     ready = (
-        vision_digits is not None
-        and segment.raw_digits == vision_digits
-        and len(vision_digits) >= 6
-        and len(vision_digits) <= 18
-        and (confidence or 0) >= _GOOGLE_VISION_MIN_CONFIDENCE
+        ocr_digits is not None
+        and ocr_digits_supported
+        and segment_digits == ocr_digits
+        and len(ocr_digits) == 6
+        and (result.cumulative_total_confidence or 0)
+        >= _GOOGLE_VISION_MIN_CONFIDENCE
         and (segment.confidence or 0) >= 0.55
         and not warnings
     )
@@ -1436,21 +1464,21 @@ def _apply_piusi_total_evidence(
             if result.status in {"failed", "unavailable"}
             else "uncertain"
         ),
-        cumulative_total_litres=(
-            float(chosen_value) if chosen_value is not None else None
-        ),
-        cumulative_total_confidence=confidence,
+        cumulative_total_litres=result.cumulative_total_litres,
+        cumulative_total_confidence=result.cumulative_total_confidence,
         message=message,
         provider=provider,
-        cumulative_total_raw_digits=chosen_digits,
+        cumulative_total_raw_digits=ocr_digits,
         cumulative_total_decimal_position=(
-            max(0, len(chosen_digits) - 3)
-            if chosen_digits is not None
+            max(0, len(ocr_digits) - 3)
+            if ocr_digits is not None
             else None
         ),
         cumulative_total_segment_confidence=(
             segment.confidence * 100 if segment.confidence is not None else None
         ),
+        cumulative_total_segment_raw_digits=segment_digits,
+        cumulative_total_suggested_raw_digits=suggested_digits,
         warnings=tuple(warnings),
     )
 

@@ -35,6 +35,7 @@ from backend.app.services.meter_photos import (
     verify_meter_photo,
 )
 from backend.app.services.meter_readings import (
+    InvalidMeterDigits,
     assess_meter_readings,
     milli_litres_to_decimal,
     parse_total_raw_digits,
@@ -44,11 +45,26 @@ from backend.app.services.vehicles import create_vehicle
 
 class MeterReadingConversionTests(unittest.TestCase):
     def test_total_raw_digits_use_three_decimal_places(self) -> None:
-        self.assertEqual(parse_total_raw_digits("000000"), 0)
-        self.assertEqual(
-            milli_litres_to_decimal(parse_total_raw_digits("261789")),
-            Decimal("261.789"),
-        )
+        for raw_digits, expected in (
+            ("000000", Decimal("0.000")),
+            ("261563", Decimal("261.563")),
+            ("261798", Decimal("261.798")),
+            ("267981", Decimal("267.981")),
+        ):
+            with self.subTest(raw_digits=raw_digits):
+                self.assertEqual(parse_total_raw_digits(raw_digits), int(raw_digits))
+                self.assertEqual(
+                    milli_litres_to_decimal(parse_total_raw_digits(raw_digits)),
+                    expected,
+                )
+
+    def test_total_raw_digits_must_contain_exactly_six_digits(self) -> None:
+        for raw_digits in ("26156", "2615630", "12a563", "１２３４５６"):
+            with self.subTest(raw_digits=raw_digits):
+                with self.assertRaises(InvalidMeterDigits):
+                    parse_total_raw_digits(raw_digits)
+        with self.assertRaises(ValueError):
+            MeterReadingPreviewRequest(cumulativeTotalRawDigits="2615630")
 
     def test_delta_is_exact_and_decreases_are_flagged(self) -> None:
         increasing = assess_meter_readings(
@@ -284,6 +300,34 @@ class MeterReadingWorkflowTests(unittest.TestCase):
                     ),
                 )
 
+    def test_segment_candidate_is_retained_and_confirmed_separately(self) -> None:
+        with Session(self.engine) as session, session.begin():
+            _, employee, vehicle = self._create_accounts_and_vehicle(session)
+            self._set_global_total(session, 261563)
+            photo = self._create_photo(
+                session,
+                employee,
+                vehicle,
+                ocr_digits="1663",
+                ocr_status="uncertain",
+            )
+            photo.ocr_cumulative_total_segment_raw_digits = "261563"
+            photo.suggested_cumulative_total_raw_digits = "261563"
+
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                cumulative_total_raw_digits="261563",
+            )
+
+            self.assertEqual(verified.ocr_cumulative_total_raw_digits, "1663")
+            self.assertEqual(
+                verified.ocr_cumulative_total_segment_raw_digits, "261563"
+            )
+            self.assertEqual(verified.cumulative_total_raw_digits, "261563")
+            self.assertTrue(verified.cumulative_total_manually_corrected)
+
     def test_unchanged_ocr_total_is_marked_not_manually_corrected(self) -> None:
         with Session(self.engine) as session, session.begin():
             _, employee, vehicle = self._create_accounts_and_vehicle(session)
@@ -370,10 +414,10 @@ class MeterReadingWorkflowTests(unittest.TestCase):
                 session,
                 employee,
                 vehicle,
-                ocr_digits="261789",
+                ocr_digits="61789",
             )
 
-            with self.assertRaisesRegex(InvalidMeterVerification, "at least six digits"):
+            with self.assertRaisesRegex(InvalidMeterVerification, "exactly six digits"):
                 verify_meter_photo(
                     session,
                     employee,

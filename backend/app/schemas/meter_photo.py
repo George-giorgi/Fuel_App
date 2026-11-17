@@ -47,6 +47,8 @@ class MeterPhotoRead(BaseModel):
     ocr_cumulative_total_confidence: float | None
     ocr_provider: str | None
     ocr_cumulative_total_raw_digits: str | None
+    ocr_cumulative_total_segment_raw_digits: str | None = None
+    suggested_cumulative_total_raw_digits: str | None = None
     ocr_cumulative_total_decimal_position: int | None
     ocr_cumulative_total_segment_confidence: float | None
     ocr_warnings: list[str] | None
@@ -79,7 +81,7 @@ class MeterPhotoVerify(BaseModel):
         default=None, ge=0, decimal_places=3
     )
     cumulative_total_raw_digits: str | None = Field(
-        default=None, min_length=6, max_length=18
+        default=None, min_length=6, max_length=6
     )
 
     @model_validator(mode="after")
@@ -93,6 +95,11 @@ class MeterPhotoVerify(BaseModel):
             and not self.cumulative_total_litres.is_finite()
         ):
             raise ValueError("Meter readings must be finite numbers.")
+        if (
+            self.cumulative_total_litres is not None
+            and self.cumulative_total_litres > Decimal("999.999")
+        ):
+            raise ValueError("Global cumulative total must fit exactly six meter digits.")
         value = self.cumulative_total_raw_digits
         if value is not None and (not value.isascii() or not value.isdigit()):
             raise ValueError("cumulative_total_raw_digits must contain digits only.")

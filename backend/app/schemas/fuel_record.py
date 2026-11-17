@@ -74,7 +74,7 @@ class FuelRecordCreate(BaseModel):
         default=None, ge=0, allow_inf_nan=False, decimal_places=3
     )
     cumulative_total_raw_digits: str | None = Field(
-        default=None, min_length=6, max_length=18
+        default=None, min_length=6, max_length=6
     )
     confirmed: bool = False
     calculated_fill_confirmed: bool = False
@@ -117,6 +117,11 @@ class FuelRecordCreate(BaseModel):
             and self.cumulative_total_litres.as_tuple().exponent < -3
         ):
             raise ValueError("Legacy total values allow up to 3 decimals.")
+        if (
+            self.cumulative_total_litres is not None
+            and self.cumulative_total_litres > Decimal("999.999")
+        ):
+            raise ValueError("Global cumulative total must fit exactly six meter digits.")
         return self
 
 
@@ -180,7 +185,7 @@ class MeterReadingPreviewRequest(BaseModel):
         extra="forbid",
     )
 
-    cumulative_total_raw_digits: str = Field(min_length=6, max_length=18)
+    cumulative_total_raw_digits: str = Field(min_length=6, max_length=6)
 
     @model_validator(mode="after")
     def validate_digits(self) -> "MeterReadingPreviewRequest":

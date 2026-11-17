@@ -52,10 +52,10 @@ def parse_total_raw_digits(raw_digits: str | None) -> int | None:
     if (
         not raw_digits.isascii()
         or not raw_digits.isdigit()
-        or len(raw_digits) > 18
+        or len(raw_digits) != 6
     ):
         raise InvalidMeterDigits(
-            "Global total digits must contain only visible digits."
+            "Global total must contain exactly six digits."
         )
     return int(raw_digits)
 

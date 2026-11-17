@@ -237,6 +237,12 @@ def store_meter_photo(
     meter_photo.ocr_cumulative_total_raw_digits = (
         ocr_result.cumulative_total_raw_digits
     )
+    meter_photo.ocr_cumulative_total_segment_raw_digits = (
+        ocr_result.cumulative_total_segment_raw_digits
+    )
+    meter_photo.suggested_cumulative_total_raw_digits = (
+        ocr_result.cumulative_total_suggested_raw_digits
+    )
     meter_photo.ocr_cumulative_total_decimal_position = (
         ocr_result.cumulative_total_decimal_position
     )
@@ -285,9 +291,10 @@ def verify_meter_photo(
             not cumulative_total_litres.is_finite()
             or cumulative_total_litres < 0
             or cumulative_total_litres.as_tuple().exponent < -3
+            or cumulative_total_litres > Decimal("999.999")
         ):
             raise InvalidMeterVerification(
-                "Global cumulative total must be non-negative with no more than 3 decimals."
+                "Global cumulative total must fit exactly six meter digits."
             )
         cumulative_total_raw_digits = str(
             decimal_to_milli_litres(cumulative_total_litres)
@@ -295,7 +302,8 @@ def verify_meter_photo(
     if cumulative_total_raw_digits is None and meter_photo.ocr_status == "ready":
         if (meter_photo.ocr_cumulative_total_confidence or 0) >= 60:
             cumulative_total_raw_digits = (
-                meter_photo.ocr_cumulative_total_raw_digits
+                meter_photo.suggested_cumulative_total_raw_digits
+                or meter_photo.ocr_cumulative_total_raw_digits
             )
     try:
         cumulative_total = parse_total_raw_digits(cumulative_total_raw_digits)
@@ -305,9 +313,9 @@ def verify_meter_photo(
         raise InvalidMeterVerification(
             "The global cumulative total is missing. Check the TOTAL row and enter its digits."
         )
-    if cumulative_total_raw_digits is None or len(cumulative_total_raw_digits) < 6:
+    if cumulative_total_raw_digits is None or len(cumulative_total_raw_digits) != 6:
         raise InvalidMeterVerification(
-            "The TOTAL reading must contain at least six digits. Check for missing digits."
+            "The TOTAL reading must contain exactly six digits. Check for missing or extra digits."
         )
     global_meter = session.get(GlobalMeterState, 1)
     previous_total = (

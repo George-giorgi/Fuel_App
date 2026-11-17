@@ -41,7 +41,6 @@ import {
 } from './utils/distance.js';
 import {
   formatRawMeterDigitsAsLitres,
-  ocrValueToRawDigits,
   rawMeterDigitsToLitres
 } from './utils/meterReadings.js';
 
@@ -417,7 +416,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
     if (
       !photo ||
       photo.verifiedAt ||
-      !/^[0-9]{6,18}$/.test(cumulativeTotalDraft.trim())
+      !/^[0-9]{6}$/.test(cumulativeTotalDraft.trim())
     ) {
       setPreviewLoading(false);
       return undefined;
@@ -672,9 +671,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
       {entryMode === 'manual' && (
         <form className="meter-review-form" onSubmit={handleManualConfirm}>
           <p>
-            Enter all six or more TOTAL digits exactly. The decimal point is
-            three places from the right: 261789 means 261.789 L. Manual digit
-            entry still requires a photo of the meter as supporting evidence.
+            Enter exactly six TOTAL digits. The decimal point is three places
+            from the right: 261563 is 261.563 L, 261798 is 261.798 L, and
+            267981 is 267.981 L. Manual entry still requires a supporting photo.
           </p>
           <label>
             Global cumulative raw digits (TOTAL row)
@@ -682,7 +681,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
               type="text"
               inputMode="numeric"
               autoComplete="off"
-              pattern="[0-9]{6,18}"
+              pattern="[0-9]{6}"
+              minLength={6}
+              maxLength={6}
               required
               value={manualCumulativeTotalDraft}
               onChange={(event) => {
@@ -851,16 +852,21 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
-                <span>OCR-suggested Global Cumulative Total</span>
+                <span>Suggested Global Cumulative Total</span>
               </span>
               <strong>
                 {formatOcrCumulativeTotal(photo)}
-                {photo.ocrCumulativeTotalConfidence != null &&
-                  ` (${Math.round(photo.ocrCumulativeTotalConfidence)}% confidence)`}
+                {photo.suggestedCumulativeTotalRawDigits &&
+                  suggestedCumulativeTotalConfidence(photo) != null &&
+                  ` (${Math.round(suggestedCumulativeTotalConfidence(photo))}% confidence)`}
               </strong>
               <small>
-                OCR raw digits (retained):{' '}
+                {photo.ocrProvider === 'google_vision'
+                  ? 'Google Vision'
+                  : photo.ocrProvider || 'OCR'} raw digits (retained):{' '}
                 {photo.ocrCumulativeTotalRawDigits || 'not detected'}.
+                {' '}OpenCV candidate:{' '}
+                {photo.ocrCumulativeTotalSegmentRawDigits || 'not detected'}.
                 {photo.ocrCumulativeTotalSegmentConfidence != null &&
                   ` Segment confidence ${Math.round(photo.ocrCumulativeTotalSegmentConfidence)}%.`}
               </small>
@@ -926,9 +932,9 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
           ) : (
             <form className="meter-review-form" onSubmit={handleVerify}>
               <p>
-                Review the original photo and correct the TOTAL digits if needed.
-                The decimal point is three places from the right; for example,
-                261789 means 261.789 L.
+                Review the original photo and correct the six TOTAL digits if
+                needed. Keep their order exactly as displayed; the decimal
+                point is three places from the right.
               </p>
               <label>
                 Global Cumulative Total
@@ -936,13 +942,13 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                   type="text"
                   inputMode="numeric"
                   autoComplete="off"
-                  pattern="[0-9]{6,18}"
+                  pattern="[0-9]{6}"
                   minLength={6}
-                  maxLength={18}
+                  maxLength={6}
                   required
                   value={cumulativeTotalDraft}
                   onChange={(event) => setCumulativeTotalDraft(event.target.value)}
-                  placeholder="e.g. 261789"
+                  placeholder="e.g. 261563"
                 />
                 {formatRawMeterDigitsAsLitres(cumulativeTotalDraft) != null && (
                   <small aria-live="polite">
@@ -993,7 +999,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
                 disabled={
                   verifying ||
                   previewLoading ||
-                  !/^[0-9]{6,18}$/.test(cumulativeTotalDraft.trim())
+                  !/^[0-9]{6}$/.test(cumulativeTotalDraft.trim())
                 }
               >
                 <AppIcon name="check" size={16} />
@@ -1684,18 +1690,26 @@ function formatCumulativeTotal(value) {
 }
 
 function formatOcrCumulativeTotal(photo) {
-  if (photo.ocrCumulativeTotalRawDigits) {
-    return `${formatRawMeterDigitsAsLitres(photo.ocrCumulativeTotalRawDigits)} litres`;
+  if (photo.suggestedCumulativeTotalRawDigits) {
+    return `${formatRawMeterDigitsAsLitres(photo.suggestedCumulativeTotalRawDigits)} litres`;
   }
-  if (photo.ocrCumulativeTotalLitres == null) return 'Not recorded';
-  return `${formatCumulativeTotal(photo.ocrCumulativeTotalLitres)} litres`;
+  return 'Manual review required';
+}
+
+function suggestedCumulativeTotalConfidence(photo) {
+  const suggestedDigits = photo.suggestedCumulativeTotalRawDigits;
+  if (
+    suggestedDigits &&
+    suggestedDigits === photo.ocrCumulativeTotalSegmentRawDigits &&
+    suggestedDigits !== photo.ocrCumulativeTotalRawDigits
+  ) {
+    return photo.ocrCumulativeTotalSegmentConfidence;
+  }
+  return photo.ocrCumulativeTotalConfidence;
 }
 
 function cumulativeTotalDraftValue(photo) {
-  if (photo.ocrCumulativeTotalRawDigits) {
-    return photo.ocrCumulativeTotalRawDigits;
-  }
-  return ocrValueToRawDigits(photo.ocrCumulativeTotalLitres);
+  return photo.suggestedCumulativeTotalRawDigits || '';
 }
 
 function downloadJson(value, filename) {

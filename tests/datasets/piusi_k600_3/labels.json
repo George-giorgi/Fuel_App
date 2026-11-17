@@ -4,9 +4,6 @@
   "examples": [
     {
       "image": "reference.jpeg",
-      "current_fill": "22.032",
-      "current_fill_raw_digits": "22032",
-      "current_fill_decimal_position": 2,
       "cumulative_total": "261.563",
       "cumulative_total_raw_digits": "261563",
       "cumulative_total_decimal_position": 3,
@@ -14,20 +11,14 @@
     },
     {
       "image": "example_dark_60313_261798.jpeg",
-      "current_fill": "60.313",
-      "current_fill_raw_digits": "60313",
-      "current_fill_decimal_position": 2,
-      "cumulative_total": "261.789",
-      "cumulative_total_raw_digits": "261789",
+      "cumulative_total": "261.798",
+      "cumulative_total_raw_digits": "261798",
       "cumulative_total_decimal_position": 3,
       "expected_ocr_status": "uncertain",
-      "known_ocr_misread_raw_digits": "261798"
+      "google_vision_raw_digits": "267981"
     },
     {
       "image": "example_closeup_22032_261563.jpeg",
-      "current_fill": "22.032",
-      "current_fill_raw_digits": "22032",
-      "current_fill_decimal_position": 2,
       "cumulative_total": "261.563",
       "cumulative_total_raw_digits": "261563",
       "cumulative_total_decimal_position": 3,

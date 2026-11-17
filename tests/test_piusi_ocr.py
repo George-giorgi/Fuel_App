@@ -15,9 +15,11 @@ from sqlalchemy import create_engine, inspect
 
 from backend.app.services.meter_ocr import (
     MeterOcrResult,
+    _extract_google_vision_total,
     _apply_piusi_total_evidence,
     _apply_piusi_evidence,
     _google_vision_text_detection_disagrees,
+    _total_ocr_result,
     parse_meter_ocr_data,
 )
 from backend.app.services.piusi_lcd import (
@@ -44,6 +46,140 @@ def _candidate_ocr_result() -> MeterOcrResult:
 
 
 class PiusiOcrTests(unittest.TestCase):
+    def test_incomplete_vision_uses_complete_segment_candidate_for_review(self) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        result = _apply_piusi_total_evidence(
+            MeterOcrResult(
+                status="uncertain",
+                cumulative_total_litres=1.663,
+                cumulative_total_confidence=60,
+                cumulative_total_raw_digits="1663",
+            ),
+            lcd,
+            "google_vision",
+        )
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.cumulative_total_raw_digits, "1663")
+        self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
+        self.assertEqual(result.cumulative_total_suggested_raw_digits, "261563")
+        self.assertEqual(result.cumulative_total_litres, 1.663)
+        self.assertTrue(any("disagree" in warning for warning in result.warnings))
+
+    def test_complete_conflicting_candidates_require_manual_digits(self) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        result = _apply_piusi_total_evidence(
+            MeterOcrResult(
+                status="uncertain",
+                cumulative_total_litres=267.981,
+                cumulative_total_confidence=67,
+                cumulative_total_raw_digits="267981",
+            ),
+            lcd,
+            "google_vision",
+        )
+
+        self.assertEqual(result.cumulative_total_raw_digits, "267981")
+        self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
+        self.assertIsNone(result.cumulative_total_suggested_raw_digits)
+        self.assertTrue(any("disagree" in warning for warning in result.warnings))
+
+    def test_ocr_candidate_requires_exactly_six_digits(self) -> None:
+        for digits in ("26156", "2615630"):
+            with self.subTest(digits=digits):
+                result = _total_ocr_result(digits, 96, "google_vision")
+                self.assertEqual(result.status, "uncertain")
+                self.assertEqual(result.cumulative_total_raw_digits, digits)
+                self.assertTrue(
+                    any("exactly six digits" in warning for warning in result.warnings)
+                )
+
+    def test_google_vision_uses_only_the_detected_total_row_crop(self) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        response_data = {"responses": [{}]}
+        with (
+            patch(
+                "backend.app.services.meter_ocr._prepare_google_vision_detected_image",
+                return_value=b"prepared-total-row",
+            ) as prepare_image,
+            patch(
+                "backend.app.services.meter_ocr._call_google_vision",
+                return_value=response_data,
+            ) as call_vision,
+            patch(
+                "backend.app.services.meter_ocr._google_vision_response_lines",
+                return_value=[(0, "261563", 96)],
+            ),
+        ):
+            result = _extract_google_vision_total("test-key", lcd)
+
+        prepare_image.assert_called_once_with(
+            lcd.total_row_crop,
+            grayscale=True,
+            min_width=1600,
+        )
+        call_vision.assert_called_once_with(
+            [b"prepared-total-row"],
+            "test-key",
+            text_detection_first=True,
+        )
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertEqual(result.status, "ready")
+
+    def test_conflicting_google_vision_sequences_are_preserved_as_uncertain(
+        self,
+    ) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        with (
+            patch(
+                "backend.app.services.meter_ocr._prepare_google_vision_detected_image",
+                return_value=b"prepared-total-row",
+            ),
+            patch(
+                "backend.app.services.meter_ocr._call_google_vision",
+                return_value={"responses": [{}]},
+            ),
+            patch(
+                "backend.app.services.meter_ocr._google_vision_response_lines",
+                return_value=[
+                    (0, "261563", 96),
+                    (1, "267981", 92),
+                ],
+            ),
+        ):
+            result = _extract_google_vision_total("test-key", lcd)
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertTrue(any("261563, 267981" in warning for warning in result.warnings))
+
+    def test_total_segment_classifier_rejects_extra_digits(self) -> None:
+        display = np.zeros((100, 450, 3), dtype=np.uint8)
+        boxes = [
+            (10 + index * 55, 20, 20, 60)
+            for index in range(7)
+        ]
+
+        with (
+            patch.object(piusi_lcd, "_group_components", return_value=boxes),
+            patch.object(
+                piusi_lcd, "_classify_glyph", return_value=("1", 0.9)
+            ),
+        ):
+            result = piusi_lcd._recognize_row(
+                display,
+                (0, 0, 1, 1),
+                minimum_digits=6,
+                split_wide_glyphs=True,
+                segment_threshold=0.45,
+                whole_number=True,
+                expected_digits=6,
+                adaptive_masks=False,
+                minimum_agreeing_masks=1,
+            )
+
+        self.assertIsNone(result.raw_digits)
+
     def test_current_fill_rejects_a_truncated_three_digit_reading(self) -> None:
         display = np.zeros((100, 200, 3), dtype=np.uint8)
         boxes = [
@@ -99,37 +235,33 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.raw_digits, "111111")
         self.assertEqual(result.value, Decimal("111.111"))
 
-    def test_reference_reads_both_rows_with_three_decimal_places(self) -> None:
+    def test_reference_reads_exactly_six_total_digits(self) -> None:
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
         example = labels["examples"][0]
-        result = recognize_piusi_lcd(REFERENCE.read_bytes())
+        result = recognize_piusi_total(REFERENCE.read_bytes())
 
         self.assertTrue(result.display_found)
-        self.assertEqual(result.current_fill.raw_digits, "22032")
         self.assertEqual(result.cumulative_total.raw_digits, "261563")
-        self.assertEqual(result.current_fill.decimal_position, 2)
         self.assertEqual(result.cumulative_total.decimal_position, 3)
-        self.assertEqual(result.current_fill.value, Decimal("22.032"))
         self.assertEqual(result.cumulative_total.value, Decimal("261.563"))
-        self.assertEqual(
-            Decimal(
-                f"{example['current_fill_raw_digits'][:example['current_fill_decimal_position']]}."
-                f"{example['current_fill_raw_digits'][example['current_fill_decimal_position']:]}"
-            ),
-            Decimal(example["current_fill"]),
-        )
         self.assertEqual(example["cumulative_total_decimal_position"], 3)
         self.assertEqual(
             int(example["cumulative_total_raw_digits"]),
             int(Decimal(example["cumulative_total"]) * 1000),
         )
-        reconciled = _apply_piusi_evidence(
-            _candidate_ocr_result(), result, "google_vision"
+        reconciled = _apply_piusi_total_evidence(
+            MeterOcrResult(
+                status="ready",
+                cumulative_total_litres=261.563,
+                cumulative_total_confidence=94,
+                cumulative_total_raw_digits="261563",
+            ),
+            result,
+            "google_vision",
         )
         self.assertEqual(reconciled.status, "ready")
-        self.assertEqual(reconciled.current_fill_litres, 22032)
         self.assertEqual(reconciled.cumulative_total_litres, 261.563)
-        self.assertEqual(reconciled.current_fill_decimal_position, 2)
+        self.assertEqual(reconciled.cumulative_total_suggested_raw_digits, "261563")
 
     def test_labeled_lcd_crops_match_digits_and_review_status(self) -> None:
         labels = json.loads((DATASET / "labels.json").read_text(encoding="utf-8"))
@@ -140,36 +272,22 @@ class PiusiOcrTests(unittest.TestCase):
                 )
                 self.assertTrue(result.display_found)
                 expected_digits = example["cumulative_total_raw_digits"]
-                if example.get("known_ocr_misread_raw_digits"):
-                    self.assertEqual(
-                        result.cumulative_total.raw_digits,
-                        example["known_ocr_misread_raw_digits"],
-                    )
-                    self.assertNotEqual(
-                        result.cumulative_total.raw_digits,
-                        expected_digits,
-                    )
-                else:
-                    self.assertEqual(
-                        result.cumulative_total.raw_digits,
-                        expected_digits,
-                    )
+                self.assertEqual(result.cumulative_total.raw_digits, expected_digits)
                 self.assertEqual(
                     result.cumulative_total.decimal_position, 3
                 )
                 self.assertEqual(
                     result.cumulative_total.value,
-                    Decimal(example["known_ocr_misread_raw_digits"]).scaleb(-3)
-                    if example.get("known_ocr_misread_raw_digits")
-                    else Decimal(example["cumulative_total"]),
+                    Decimal(example["cumulative_total"]),
+                )
+                vision_digits = example.get(
+                    "google_vision_raw_digits", expected_digits
                 )
                 vision_result = MeterOcrResult(
                     status="ready",
-                    cumulative_total_litres=float(
-                        Decimal(result.cumulative_total.raw_digits).scaleb(-3)
-                    ),
-                    cumulative_total_confidence=94,
-                    cumulative_total_raw_digits=result.cumulative_total.raw_digits,
+                    cumulative_total_litres=float(Decimal(vision_digits).scaleb(-3)),
+                    cumulative_total_confidence=67 if vision_digits != expected_digits else 94,
+                    cumulative_total_raw_digits=vision_digits,
                     cumulative_total_decimal_position=3,
                 )
                 reconciled = _apply_piusi_total_evidence(
@@ -177,6 +295,14 @@ class PiusiOcrTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     reconciled.status, example["expected_ocr_status"]
+                )
+                self.assertEqual(reconciled.cumulative_total_raw_digits, vision_digits)
+                self.assertEqual(
+                    reconciled.cumulative_total_segment_raw_digits, expected_digits
+                )
+                self.assertEqual(
+                    reconciled.cumulative_total_suggested_raw_digits,
+                    expected_digits if vision_digits == expected_digits else None,
                 )
 
     def test_cumulative_row_uses_adaptive_threshold_when_color_is_absent(self) -> None:
@@ -194,7 +320,7 @@ class PiusiOcrTests(unittest.TestCase):
         )
 
         with patch.object(piusi_lcd, "_lcd_candidate", return_value=display):
-            result = recognize_piusi_lcd(REFERENCE.read_bytes())
+            result = recognize_piusi_total(REFERENCE.read_bytes())
 
         self.assertEqual(result.cumulative_total.raw_digits, "261563")
         self.assertEqual(result.cumulative_total.value, Decimal("261.563"))
@@ -416,6 +542,40 @@ class PiusiOcrTests(unittest.TestCase):
                         "ocr_current_fill_segment_confidence",
                         "ocr_cumulative_total_segment_confidence",
                         "ocr_warnings",
+                    }.issubset(columns)
+                )
+                with Operations.context(context):
+                    migration.downgrade()
+                self.assertEqual(
+                    {column["name"] for column in inspect(connection).get_columns(
+                        "meter_photos"
+                    )},
+                    {"id"},
+                )
+        finally:
+            engine.dispose()
+
+    def test_total_candidate_migration_is_additive_on_sqlite(self) -> None:
+        migration = importlib.import_module(
+            "backend.migrations.versions.0020_piusi_candidate_evidence"
+        )
+        engine = create_engine("sqlite://")
+        try:
+            with engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "CREATE TABLE meter_photos (id INTEGER PRIMARY KEY)"
+                )
+                context = MigrationContext.configure(connection)
+                with Operations.context(context):
+                    migration.upgrade()
+                columns = {
+                    column["name"]
+                    for column in inspect(connection).get_columns("meter_photos")
+                }
+                self.assertTrue(
+                    {
+                        "ocr_cumulative_total_segment_raw_digits",
+                        "suggested_cumulative_total_raw_digits",
                     }.issubset(columns)
                 )
                 with Operations.context(context):

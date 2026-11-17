@@ -227,6 +227,12 @@ def _meter_photo_read(
         ocr_cumulative_total_raw_digits=(
             meter_photo.ocr_cumulative_total_raw_digits
         ),
+        ocr_cumulative_total_segment_raw_digits=(
+            meter_photo.ocr_cumulative_total_segment_raw_digits
+        ),
+        suggested_cumulative_total_raw_digits=(
+            meter_photo.suggested_cumulative_total_raw_digits
+        ),
         ocr_cumulative_total_decimal_position=(
             meter_photo.ocr_cumulative_total_decimal_position
         ),
