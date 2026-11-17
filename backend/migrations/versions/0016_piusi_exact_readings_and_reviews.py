@@ -1,6 +1,6 @@
 """Store exact PIUSI readings and pending review evidence.
 
-Revision ID: 0016_piusi_exact_readings_and_reviews
+Revision ID: 0016_meter_reviews
 Revises: 0015_piusi_ocr_evidence
 Create Date: 2026-11-16
 """
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "0016_piusi_exact_readings_and_reviews"
+revision: str = "0016_meter_reviews"
 down_revision: Union[str, None] = "0015_piusi_ocr_evidence"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

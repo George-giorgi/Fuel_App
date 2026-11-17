@@ -1,7 +1,7 @@
 """Normalize whole-digit meter readings to litres and backfill exact units.
 
 Revision ID: 0018_global_total_millilitres
-Revises: 0017_global_fill_source_and_top_evidence
+Revises: 0017_fill_evidence
 Create Date: 2026-11-17
 """
 from decimal import Decimal, InvalidOperation
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 revision: str = "0018_global_total_millilitres"
-down_revision: Union[str, None] = "0017_global_fill_source_and_top_evidence"
+down_revision: Union[str, None] = "0017_fill_evidence"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, None] = None
 
