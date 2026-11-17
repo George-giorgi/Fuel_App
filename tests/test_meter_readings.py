@@ -517,6 +517,70 @@ class MeterReadingWorkflowTests(unittest.TestCase):
                 )
             self.assertIsNone(photo.verified_at)
 
+    def test_confirmed_ocr_values_without_raw_digits_save_without_admin_review(
+        self,
+    ) -> None:
+        with Session(self.engine) as session, session.begin():
+            _, employee, vehicle = self._create_accounts_and_vehicle(session)
+            now = datetime.now(timezone.utc)
+            session.add(
+                GlobalMeterState(
+                    id=1,
+                    current_cumulative_total_litres=239.531,
+                    current_total_integer=239_531,
+                    current_total_raw_digits="239531",
+                    revision=1,
+                )
+            )
+            qr_session = QrSession(
+                token_hash=sha256(b"confirmed-ocr-session").hexdigest(),
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                created_at=now,
+                expires_at=now + timedelta(minutes=5),
+            )
+            session.add(qr_session)
+            session.flush()
+            photo = MeterPhoto(
+                qr_session_id=qr_session.id,
+                employee_id=employee.id,
+                vehicle_id=vehicle.id,
+                storage_key="confirmed-ocr-photo",
+                content_type="image/jpeg",
+                size_bytes=1,
+                sha256=sha256(b"confirmed-ocr-photo").hexdigest(),
+                uploaded_at=now,
+                ocr_status="uncertain",
+                ocr_current_fill_litres=22032,
+                ocr_cumulative_total_litres=261.563,
+                ocr_warnings=[
+                    "The current-fill digits need manual review.",
+                    "The cumulative-total digits need manual review.",
+                ],
+            )
+            session.add(photo)
+            session.flush()
+
+            verified = verify_meter_photo(
+                session,
+                employee,
+                photo.id,
+                current_fill_raw_digits="22032",
+                cumulative_total_raw_digits="261563",
+            )
+            self.assertEqual(verified.ocr_warnings, [])
+
+            record = create_fuel_record(
+                session,
+                employee,
+                FuelRecordCreate(
+                    meterPhotoId=photo.id,
+                    odometerMiles=1000,
+                ),
+            )
+            self.assertIsInstance(record, FuelRecord)
+            self.assertEqual(record.cumulative_total_integer, 261_563)
+
     def test_concurrent_global_meter_change_fails_compare_and_swap(self) -> None:
         with Session(self.engine) as session, session.begin():
             _, employee, vehicle = self._create_accounts_and_vehicle(session)

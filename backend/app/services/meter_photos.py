@@ -367,24 +367,39 @@ def verify_meter_photo(
         tank_capacity_litres=vehicle.tank_capacity,
     )
     evidence_warnings = list(meter_photo.ocr_warnings or [])
-    for label, numeric_value, raw_digits in (
+    confirmed_ocr_rows: set[str] = set()
+    for label, numeric_value, raw_digits, confirmed_raw_digits in (
         (
             "current-fill",
             meter_photo.ocr_current_fill_litres,
             meter_photo.ocr_current_fill_raw_digits,
+            current_fill_raw_digits,
         ),
         (
             "global-total",
             meter_photo.ocr_cumulative_total_litres,
             meter_photo.ocr_cumulative_total_raw_digits,
+            cumulative_total_raw_digits,
         ),
     ):
         if numeric_value is None and raw_digits is None:
             continue
         if raw_digits is None:
-            evidence_warnings.append(
-                f"OCR {label} has no raw-digit evidence and requires review."
-            )
+            if numeric_value is not None and confirmed_raw_digits is not None:
+                confirmed_value = Decimal(int(confirmed_raw_digits))
+                if label == "global-total":
+                    confirmed_value = confirmed_value.scaleb(-3)
+                ocr_value = Decimal(str(numeric_value))
+                if ocr_value.is_finite() and ocr_value == confirmed_value:
+                    confirmed_ocr_rows.add(label)
+                else:
+                    evidence_warnings.append(
+                        f"OCR {label} has no raw-digit evidence and requires review."
+                    )
+            else:
+                evidence_warnings.append(
+                    f"OCR {label} has no raw-digit evidence and requires review."
+                )
         elif not raw_digits.isascii() or not raw_digits.isdigit():
             evidence_warnings.append(
                 f"OCR {label} contains invalid raw digits and requires review."
@@ -401,6 +416,15 @@ def verify_meter_photo(
             evidence_warnings.append(
                 f"OCR {label} numeric result disagrees with its raw digits."
             )
+    for label in confirmed_ocr_rows:
+        warning_row_name = (
+            "cumulative-total" if label == "global-total" else label
+        )
+        evidence_warnings = [
+            warning
+            for warning in evidence_warnings
+            if warning != f"The {warning_row_name} digits need manual review."
+        ]
     current_fill_litres = milli_litres_to_decimal(
         assessment.fill_milli_litres
     )
