@@ -1525,29 +1525,6 @@ def _apply_piusi_total_evidence(
     segment = lcd.cumulative_total
     segment_digits = segment.raw_digits
     provider_name = "Google Vision" if provider == "google_vision" else "Tesseract"
-    segment_fallback = (
-        ocr_digits is None
-        and segment_digits is not None
-        and len(segment_digits) == 6
-        and (segment.confidence or 0) >= 0.55
-    )
-    if segment_fallback:
-        ocr_digits = segment_digits
-        ocr_digits_supported = True
-        result_confidence = (segment.confidence or 0) * 100
-        ocr_litres = float(Decimal(segment_digits).scaleb(-3))
-        result = replace(
-            result,
-            status="uncertain",
-            cumulative_total_litres=ocr_litres,
-            cumulative_total_confidence=result_confidence,
-        )
-        warnings = [
-            warning
-            for warning in warnings
-            if "did not return TOTAL digits" not
-            in warning
-        ]
     if ocr_digits is None and segment_digits is not None:
         warnings.append(
             f"{provider_name} did not return TOTAL digits; the OpenCV candidate needs manual confirmation."

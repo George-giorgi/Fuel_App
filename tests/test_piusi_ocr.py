@@ -72,9 +72,7 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.cumulative_total_litres, 1.663)
         self.assertTrue(any("disagree" in warning for warning in result.warnings))
 
-    def test_high_confidence_opencv_candidate_recovers_missing_tesseract_digits(
-        self,
-    ) -> None:
+    def test_opencv_candidate_is_not_suggested_without_ocr_digits(self) -> None:
         lcd = recognize_piusi_total(REFERENCE.read_bytes())
         result = _apply_piusi_total_evidence(
             MeterOcrResult(status="uncertain"),
@@ -82,10 +80,16 @@ class PiusiOcrTests(unittest.TestCase):
             "tesseract",
         )
 
-        self.assertEqual(result.status, "ready")
-        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.cumulative_total_raw_digits)
         self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
-        self.assertEqual(result.cumulative_total_suggested_raw_digits, "261563")
+        self.assertIsNone(result.cumulative_total_suggested_raw_digits)
+        self.assertTrue(
+            any(
+                "Tesseract did not return TOTAL digits" in warning
+                for warning in result.warnings
+            )
+        )
 
     def test_complete_conflicting_candidates_require_manual_digits(self) -> None:
         lcd = recognize_piusi_total(REFERENCE.read_bytes())
