@@ -350,7 +350,7 @@ export function uploadMeterPhoto(
 
 export function recognizeMeterPhoto(meterPhotoId, processingPhoto = null) {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), 30000);
+  const timeoutId = window.setTimeout(() => controller.abort(), 90000);
   const options = {
     method: 'POST',
     signal: controller.signal
