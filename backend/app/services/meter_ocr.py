@@ -6,11 +6,13 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import cv2
+import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 
 from backend.app.core.config import METER_OCR_MIN_CONFIDENCE
@@ -1187,12 +1189,13 @@ def _total_ocr_result(
     text: str, confidence: float, provider: str
 ) -> MeterOcrResult:
     raw_digits = _ascii_digits(text)
+    provider_name = "Google Vision" if provider == "google_vision" else "Tesseract"
     if raw_digits is None:
         return MeterOcrResult(
             status="uncertain",
             provider=provider,
             cumulative_total_confidence=confidence,
-            message="Google Vision could not read the PIUSI TOTAL row.",
+            message=f"{provider_name} could not read the PIUSI TOTAL row.",
         )
 
     warnings = []
@@ -1339,21 +1342,36 @@ def _extract_tesseract_total(
 
     pytesseract.pytesseract.tesseract_cmd = _get_tesseract_command()
     try:
-        with Image.open(BytesIO(lcd.total_row_crop)) as source:
-            row = ImageOps.autocontrast(
-                ImageOps.exif_transpose(source).convert("L"), cutoff=1
-            )
-        width, height = row.size
-        scale = max(1, round(1600 / max(width, 1)))
-        row = row.resize(
-            (width * scale, height * scale),
-            Image.Resampling.LANCZOS,
-        )
-        output = pytesseract.image_to_data(
-            row,
-            config="--psm 7 -c tessedit_char_whitelist=0123456789",
-            output_type=Output.DICT,
-        )
+        candidates: list[tuple[str, float]] = []
+        for image_group in _prepare_tesseract_total_image_groups(lcd):
+            group_candidates = []
+            for image in image_group:
+                output = pytesseract.image_to_data(
+                    image,
+                    config="--psm 7 -c tessedit_char_whitelist=0123456789",
+                    output_type=Output.DICT,
+                )
+                words = [
+                    (str(text).strip(), float(confidence))
+                    for text, confidence in zip(
+                        output.get("text", []), output.get("conf", [])
+                    )
+                    if (
+                        str(text).strip().isascii()
+                        and str(text).strip().isdigit()
+                        and float(confidence) >= 0
+                    )
+                ]
+                if words:
+                    group_candidates.append(
+                        (
+                            "".join(word for word, _ in words),
+                            sum(score for _, score in words) / len(words),
+                        )
+                    )
+            candidates.extend(group_candidates)
+            if any(len(digits) == 6 for digits, _ in group_candidates):
+                break
     except TesseractNotFoundError:
         return MeterOcrResult(
             status="unavailable",
@@ -1366,21 +1384,127 @@ def _extract_tesseract_total(
             provider="tesseract",
             message=f"Local Tesseract OCR failed: {error}",
         )
+    except subprocess.CalledProcessError as error:
+        return MeterOcrResult(
+            status="failed",
+            provider="tesseract",
+            message=f"Local Tesseract executable failed: {error}",
+        )
+    except (OSError, ValueError, Image.DecompressionBombError, cv2.error) as error:
+        return MeterOcrResult(
+            status="failed",
+            provider="tesseract",
+            message=f"Could not prepare the PIUSI TOTAL row for Tesseract: {error}",
+        )
 
-    words = [
-        (str(text).strip(), float(confidence))
-        for text, confidence in zip(output.get("text", []), output.get("conf", []))
-        if str(text).strip() and str(text).strip().isdigit()
-    ]
-    if not words:
+    if not candidates:
         return MeterOcrResult(
             status="uncertain",
             provider="tesseract",
             message="Tesseract could not read the PIUSI TOTAL row.",
         )
-    text = "".join(word for word, _ in words)
-    confidence = sum(score for _, score in words) / len(words)
-    return _total_ocr_result(text, confidence, "tesseract")
+
+    candidate_counts: dict[str, int] = {}
+    candidate_confidences: dict[str, float] = {}
+    for digits, confidence in candidates:
+        candidate_counts[digits] = candidate_counts.get(digits, 0) + 1
+        candidate_confidences[digits] = max(
+            candidate_confidences.get(digits, 0), confidence
+        )
+    ranked_digits = sorted(
+        candidate_counts,
+        key=lambda digits: (
+            len(digits) == 6,
+            candidate_counts[digits],
+            candidate_confidences[digits],
+        ),
+        reverse=True,
+    )
+    best_digits = ranked_digits[0]
+    result = _total_ocr_result(
+        best_digits,
+        candidate_confidences[best_digits],
+        "tesseract",
+    )
+    complete_candidates = sorted(
+        digits for digits in candidate_counts if len(digits) == 6
+    )
+    if len(complete_candidates) > 1:
+        warning = (
+            "Tesseract preprocessing variants disagree on TOTAL-row digits "
+            f"({', '.join(complete_candidates)}); manual review is required."
+        )
+        result = replace(
+            result,
+            status="uncertain",
+            message="; ".join(filter(None, (result.message, warning))),
+            warnings=tuple(dict.fromkeys((*result.warnings, warning))),
+        )
+    return result
+
+
+def _prepare_tesseract_total_image_groups(
+    lcd: PiusiTotalRecognition,
+) -> list[list[Image.Image]]:
+    crops = []
+    if lcd.display_crop is not None and lcd.cumulative_total.digit_bounds is not None:
+        with Image.open(BytesIO(lcd.display_crop)) as source:
+            display = ImageOps.exif_transpose(source).convert("L")
+        left, top, right, bottom = lcd.cumulative_total.digit_bounds
+        digit_height = bottom - top
+        if digit_height > 0 and right > left:
+            padding_x = max(3, round(digit_height * 0.12))
+            padding_y = max(3, round(digit_height * 0.12))
+            digit_crop = display.crop(
+                (
+                    max(0, left - padding_x),
+                    max(0, top - padding_y),
+                    min(display.width, right + padding_x),
+                    min(display.height, bottom + padding_y),
+                )
+            )
+            if digit_crop.width > 0 and digit_crop.height > 0:
+                crops.append(digit_crop)
+
+    if lcd.total_row_crop is not None:
+        with Image.open(BytesIO(lcd.total_row_crop)) as source:
+            crops.append(
+                ImageOps.exif_transpose(source).convert("L")
+            )
+
+    image_groups = []
+    for crop in crops:
+        images = []
+        normalized = _resize_for_tesseract(ImageOps.autocontrast(crop, cutoff=1))
+        gray = np.asarray(normalized)
+        images.append(normalized)
+
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, otsu = cv2.threshold(
+            blurred, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU
+        )
+        images.append(Image.fromarray(otsu))
+
+        minimum_dimension = min(gray.shape)
+        block_size = min(51, max(15, round(minimum_dimension * 0.1)))
+        if block_size % 2 == 0:
+            block_size += 1
+        if block_size >= minimum_dimension:
+            block_size = minimum_dimension - 1
+            if block_size % 2 == 0:
+                block_size -= 1
+        if block_size >= 3:
+            adaptive = cv2.adaptiveThreshold(
+                gray,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                block_size,
+                3,
+            )
+            images.append(Image.fromarray(adaptive))
+        image_groups.append(images)
+    return image_groups
 
 
 def _apply_piusi_total_evidence(
@@ -1403,15 +1527,16 @@ def _apply_piusi_total_evidence(
     segment = lcd.cumulative_total
     segment_digits = segment.raw_digits
     suggested_digits = None
+    provider_name = "Google Vision" if provider == "google_vision" else "Tesseract"
     if ocr_digits is None and segment_digits is not None:
         warnings.append(
-            "Google Vision did not return TOTAL digits; the OpenCV candidate needs manual confirmation."
+            f"{provider_name} did not return TOTAL digits; the OpenCV candidate needs manual confirmation."
         )
     if segment_digits is None:
         warnings.append("OpenCV could not verify all TOTAL-row digits.")
     elif ocr_digits is not None and ocr_digits != segment_digits:
         warnings.append(
-            "Google Vision and OpenCV disagree on the TOTAL-row digits; manual review is required."
+            f"{provider_name} and OpenCV disagree on the TOTAL-row digits; manual review is required."
         )
     if ocr_digits is not None and len(ocr_digits) != 6:
         warnings.append(

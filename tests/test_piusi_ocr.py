@@ -4,6 +4,7 @@ from dataclasses import replace
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+import subprocess
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +17,7 @@ from sqlalchemy import create_engine, inspect
 
 from backend.app.services.meter_ocr import (
     MeterOcrResult,
+    _extract_tesseract_total,
     _extract_google_vision_total,
     _apply_piusi_total_evidence,
     _apply_piusi_evidence,
@@ -107,6 +109,87 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertTrue(
             any("exactly six digits" in warning for warning in result.warnings)
         )
+
+    def test_tesseract_reads_tight_bottom_digits_and_threshold_variants(self) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        tesseract_result = {"text": ["261563"], "conf": ["96"]}
+        with patch(
+            "pytesseract.image_to_data",
+            return_value=tesseract_result,
+        ) as image_to_data:
+            result = _extract_tesseract_total(lcd)
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertEqual(image_to_data.call_count, 3)
+        with Image.open(BytesIO(lcd.display_crop)) as display:
+            full_display_height = round(display.height * 1600 / display.width)
+        self.assertTrue(
+            all(
+                call.args[0].height < full_display_height
+                for call in image_to_data.call_args_list
+            )
+        )
+
+    def test_tesseract_disagreeing_bottom_row_variants_require_review(self) -> None:
+        outputs = [
+            {"text": ["261563"], "conf": ["96"]},
+            {"text": ["261563"], "conf": ["95"]},
+            {"text": ["261798"], "conf": ["96"]},
+        ]
+        with patch("pytesseract.image_to_data", side_effect=outputs):
+            result = _extract_tesseract_total(
+                recognize_piusi_total(REFERENCE.read_bytes())
+            )
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertTrue(
+            any("preprocessing variants disagree" in warning for warning in result.warnings)
+        )
+        self.assertEqual(
+            result.cumulative_total_raw_digits,
+            "261563",
+        )
+
+    def test_tesseract_falls_back_to_lower_row_when_digit_crop_is_unreadable(
+        self,
+    ) -> None:
+        outputs = [
+            {},
+            {},
+            {},
+            {"text": ["261563"], "conf": ["96"]},
+            {"text": ["261563"], "conf": ["95"]},
+            {"text": ["261563"], "conf": ["94"]},
+        ]
+        with patch(
+            "pytesseract.image_to_data",
+            side_effect=outputs,
+        ) as image_to_data:
+            result = _extract_tesseract_total(
+                recognize_piusi_total(REFERENCE.read_bytes())
+            )
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.cumulative_total_raw_digits, "261563")
+        self.assertEqual(image_to_data.call_count, 6)
+
+    def test_tesseract_unreadable_message_names_selected_provider(self) -> None:
+        result = _total_ocr_result("", 0, "tesseract")
+
+        self.assertIn("Tesseract could not read", result.message)
+
+    def test_tesseract_executable_failure_is_reported(self) -> None:
+        with patch(
+            "pytesseract.image_to_data",
+            side_effect=subprocess.CalledProcessError(6, "tesseract --version"),
+        ):
+            result = _extract_tesseract_total(
+                recognize_piusi_total(REFERENCE.read_bytes())
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertIn("Tesseract executable failed", result.message)
 
     def test_meter_extraction_uses_only_total_row_recognition(self) -> None:
         lcd = recognize_piusi_total(REFERENCE.read_bytes())

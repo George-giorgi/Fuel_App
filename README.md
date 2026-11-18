@@ -90,10 +90,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   the HttpOnly session cookie on the Pages domain instead of relying on
   cross-site cookies. Keep `VITE_API_BASE_URL` empty for this setup.
 - **Render:** create the backend Web Service from this branch using
-  [`render.yaml`](./render.yaml). Production OCR uses Google Cloud Vision;
-  configure `GOOGLE_CLOUD_VISION_API_KEY` as a secret in Render. The Docker
-  image also installs Tesseract for local or explicitly selected Tesseract
-  deployments. The service starts with `python -m alembic upgrade head` before
+  [`render.yaml`](./render.yaml). The blueprint selects Tesseract OCR, which is
+  installed in the Docker image; no external OCR API key is required. The
+  service starts with `python -m alembic upgrade head` before
   Uvicorn. The blueprint disables standalone manual meter entry in production;
   employees can still correct OCR readings after uploading a photo. Configure
   every `sync: false` variable in Render's environment settings.
@@ -116,13 +115,13 @@ imported. The Render start command applies schema-only Alembic upgrades.
   generated object key and photo metadata in PostgreSQL; private photo reads
   pass through authenticated API endpoints. Do not configure an object
   lifecycle rule that deletes fuel photos.
-- **Secrets:** put database credentials, R2 credentials, `FUEL_AUTH_SECRET`,
-  and `GOOGLE_CLOUD_VISION_API_KEY` only in Render's backend environment. For
-  an existing manually created Render service, set
-  `FUEL_OCR_PROVIDER=google_vision` and add a restricted Vision API key there,
-  Production OCR is configured to use Google Cloud Vision; add a restricted
-  Vision API key in Render before deploying. Then redeploy. Never prefix a
-  secret with `VITE_`. Pages needs only `API_ORIGIN`.
+- **Secrets:** put database credentials, R2 credentials, and `FUEL_AUTH_SECRET`
+  only in Render's backend environment. For an existing manually created
+  Render service, set `FUEL_OCR_PROVIDER=tesseract` and redeploy; its Docker
+  image already installs the Tesseract executable. Google Cloud Vision remains
+  an optional provider and requires a restricted `GOOGLE_CLOUD_VISION_API_KEY`
+  in the backend environment. Never prefix a secret with `VITE_`. Pages needs
+  only `API_ORIGIN`.
 - **Administrator:** after Render has applied migrations, bootstrap the first
   admin once from a trusted local shell using the production Neon URL and the
   existing `python -m backend.app.cli bootstrap-admin` command. It prompts for
@@ -325,10 +324,12 @@ imported. The Render start command applies schema-only Alembic upgrades.
   fixture labels the display's raw digits as `22032` and `261563`. This single
   photo does not establish general accuracy. Add further independently labeled,
   non-transaction photos there before assessing accuracy.
-- The Render blueprint sets
-  `FUEL_OCR_PROVIDER=google_vision`. Add `GOOGLE_CLOUD_VISION_API_KEY` as a
-  secret in the Render backend environment. Local development defaults to
-  Tesseract; to use Google Vision locally, set:
+- The Render blueprint sets `FUEL_OCR_PROVIDER=tesseract`; the Docker image
+  installs the Tesseract executable and English language data. For an existing
+  Render service, set that environment variable and redeploy. Tesseract runs
+  within the backend, so meter photos are not sent to an external OCR provider.
+  Local development also defaults to Tesseract unless a Google Vision key is
+  configured. To use Google Vision instead, set:
 
   ```bash
   export FUEL_OCR_PROVIDER=google_vision
@@ -336,35 +337,20 @@ imported. The Render start command applies schema-only Alembic upgrades.
   ```
 
   Keep the key out of source control and the frontend; restrict it to the Vision
-  API and your backend's use. In this mode, each meter photo is sent from FastAPI
-  to Google as three OCR images (the full display and two digit-row crops). When
-  the TOTAL crop is unreadable or low-confidence, the backend uses Vision's
-  detected word bounds to crop and enlarge that exact row for a fourth pass.
-  Google lists the first 1,000 Vision units per month as free; review the
-  [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
-  alerts, and get approval before sending company photos.
-  When an LCD is detected, Vision receives a rectified display image and
-  separate enhanced row crops. If the TOTAL crop is unreadable or low-confidence,
-  the backend uses Vision's detected word bounds to crop and enlarge that exact
-  row for a fourth pass. The Render configuration and Google key remain
-  backend-only. Keep the key out of source control and the frontend; restrict it
-  to the Vision API and your backend's use. Google lists the first 1,000 Vision
-  units per month as free; review the
-  [current pricing](https://cloud.google.com/vision/pricing), enable quota/billing
-  alerts, and get approval before sending company photos. Local development
-  automatically uses Google Vision when
-  `GOOGLE_CLOUD_VISION_API_KEY` is configured, unless `FUEL_OCR_PROVIDER` is
-  explicitly set to another provider.
-  When `FUEL_ENV=production` and no provider is explicitly set, the backend
-  defaults to Google Vision. If the key is missing, OCR reports that Vision is
-  unavailable instead of silently falling back to local Tesseract.
-- Install Tesseract only when using the local provider. On Windows, install
+  API and your backend's use. Google Vision sends meter-photo crops from FastAPI
+  to Google; review the [current pricing](https://cloud.google.com/vision/pricing)
+  and get approval before enabling it for company photos. When
+  `FUEL_ENV=production` and no provider is explicitly set, the backend defaults
+  to Google Vision, so keep `FUEL_OCR_PROVIDER=tesseract` set on Render when
+  using the blueprint configuration.
+- Install Tesseract locally when using the local provider. On Windows, install
   `UB-Mannheim.TesseractOCR` with `winget install --id UB-Mannheim.TesseractOCR`;
   the backend detects the standard install location automatically. On macOS, use
   `brew install tesseract` or `sudo port install tesseract tesseract-eng`.
   Install Python dependencies with `python -m pip install -r requirements.txt`.
-  Local OCR tries a centered, enlarged display crop with grayscale and thresholded
-  variants, then retries the full photo if needed.
+  PIUSI Tesseract OCR uses the detected bottom-row digit bounds first, then the
+  lower TOTAL-row crop, with contrast, Otsu, and adaptive-threshold variants.
+  Conflicting six-digit results are held for manual review.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
   are also detected automatically.
