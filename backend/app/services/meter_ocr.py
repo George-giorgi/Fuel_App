@@ -1370,8 +1370,6 @@ def _extract_tesseract_total(
                         )
                     )
             candidates.extend(group_candidates)
-            if any(len(digits) == 6 for digits, _ in group_candidates):
-                break
     except TesseractNotFoundError:
         return MeterOcrResult(
             status="unavailable",
@@ -1526,7 +1524,6 @@ def _apply_piusi_total_evidence(
     ocr_digits_supported = ocr_digits is None or len(ocr_digits) <= 18
     segment = lcd.cumulative_total
     segment_digits = segment.raw_digits
-    suggested_digits = None
     provider_name = "Google Vision" if provider == "google_vision" else "Tesseract"
     if ocr_digits is None and segment_digits is not None:
         warnings.append(
@@ -1543,9 +1540,6 @@ def _apply_piusi_total_evidence(
             "The TOTAL reading must contain exactly six digits; check for missing or extra digits."
         )
 
-    ocr_is_complete = (
-        ocr_digits is not None and ocr_digits_supported and len(ocr_digits) == 6
-    )
     segment_is_complete = segment_digits is not None and len(segment_digits) == 6
     if segment_digits is not None and not segment_is_complete:
         warnings.append(
@@ -1554,8 +1548,6 @@ def _apply_piusi_total_evidence(
     if segment_digits is not None and segment.confidence is not None:
         if segment.confidence < 0.55:
             warnings.append("OpenCV TOTAL-row confidence is low.")
-    if ocr_is_complete:
-        suggested_digits = ocr_digits
     if ocr_digits is None and segment_digits is None:
         warnings.append("No TOTAL-row digits could be read.")
 
@@ -1593,7 +1585,7 @@ def _apply_piusi_total_evidence(
             segment.confidence * 100 if segment.confidence is not None else None
         ),
         cumulative_total_segment_raw_digits=segment_digits,
-        cumulative_total_suggested_raw_digits=suggested_digits,
+        cumulative_total_suggested_raw_digits=ocr_digits if ready else None,
         warnings=tuple(warnings),
     )
 

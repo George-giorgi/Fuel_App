@@ -288,11 +288,12 @@ imported. The Render start command applies schema-only Alembic upgrades.
   the two rows' raw digits separately. The bottom-row recognizer also checks
   locally adaptive grayscale masks for lighting/color variation and requires
   six digits with matching mask results; otherwise it asks for manual review.
-  Google Cloud Vision
-  remains the primary production OCR provider; the backend requests both
-  `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`, uses their text/bounds as
-  additional evidence, and compares Vision digits with the independent segment
-  result. Tesseract remains an optional local OCR provider.
+  Production uses Tesseract on both the detected digit crop and the full TOTAL
+  row, with contrast, Otsu, and adaptive-threshold variants. It compares all
+  returned six-digit candidates with each other and the independent OpenCV
+  result; the form is prefilled only when the evidence agrees. Google Cloud
+  Vision is an optional provider and can request both `TEXT_DETECTION` and
+  `DOCUMENT_TEXT_DETECTION` as additional evidence.
 - Both rows' raw digits are interpreted as integer milli-litres with three
   fractional decimal places (`22032` = `22.032 L`, `77001` = `77.001 L`,
   `100000` = `100.000 L`, and TOTAL `261563` = `261.563 L`). The row-specific
@@ -348,11 +349,10 @@ imported. The Render start command applies schema-only Alembic upgrades.
   the backend detects the standard install location automatically. On macOS, use
   `brew install tesseract` or `sudo port install tesseract tesseract-eng`.
   Install Python dependencies with `python -m pip install -r requirements.txt`.
-  PIUSI Tesseract OCR uses the detected bottom-row digit bounds first, then the
-  lower TOTAL-row crop, with contrast, Otsu, and adaptive-threshold variants.
-  Conflicting six-digit results are held for manual review. OpenCV is used to
-  cross-check the OCR result, not to prefill the form when Tesseract returns no
-  digits.
+  PIUSI Tesseract OCR processes both the detected bottom-row digit bounds and
+  the lower TOTAL-row crop, with contrast, Otsu, and adaptive-threshold
+  variants. Conflicting six-digit results are held for manual review. The form
+  is prefilled only when Tesseract and OpenCV agree with adequate confidence.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
   are also detected automatically.

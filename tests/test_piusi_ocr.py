@@ -104,7 +104,7 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.status, "uncertain")
         self.assertEqual(result.cumulative_total_raw_digits, "267981")
         self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
-        self.assertEqual(result.cumulative_total_suggested_raw_digits, "267981")
+        self.assertIsNone(result.cumulative_total_suggested_raw_digits)
         self.assertTrue(any("disagree" in warning for warning in result.warnings))
 
     def test_ocr_candidate_requires_exactly_six_digits(self) -> None:
@@ -137,7 +137,7 @@ class PiusiOcrTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.cumulative_total_raw_digits, "261563")
-        self.assertEqual(image_to_data.call_count, 3)
+        self.assertEqual(image_to_data.call_count, 6)
         with Image.open(BytesIO(lcd.display_crop)) as display:
             full_display_height = round(display.height * 1600 / display.width)
         self.assertTrue(
@@ -151,14 +151,20 @@ class PiusiOcrTests(unittest.TestCase):
         outputs = [
             {"text": ["261563"], "conf": ["96"]},
             {"text": ["261563"], "conf": ["95"]},
+            {"text": ["261563"], "conf": ["94"]},
             {"text": ["261798"], "conf": ["96"]},
+            {"text": ["261798"], "conf": ["95"]},
+            {"text": ["261798"], "conf": ["94"]},
         ]
-        with patch("pytesseract.image_to_data", side_effect=outputs):
+        with patch(
+            "pytesseract.image_to_data", side_effect=outputs
+        ) as image_to_data:
             result = _extract_tesseract_total(
                 recognize_piusi_total(REFERENCE.read_bytes())
             )
 
         self.assertEqual(result.status, "uncertain")
+        self.assertEqual(image_to_data.call_count, 6)
         self.assertTrue(
             any("preprocessing variants disagree" in warning for warning in result.warnings)
         )
@@ -571,7 +577,14 @@ class PiusiOcrTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     reconciled.cumulative_total_suggested_raw_digits,
-                    vision_digits if len(vision_digits) == 6 else None,
+                    (
+                        vision_digits
+                        if (
+                            vision_digits == expected_digits
+                            and example["expected_ocr_status"] == "ready"
+                        )
+                        else None
+                    ),
                 )
 
     def test_cumulative_row_uses_adaptive_threshold_when_color_is_absent(self) -> None:
