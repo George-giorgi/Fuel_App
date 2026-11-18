@@ -350,9 +350,9 @@ imported. The Render start command applies schema-only Alembic upgrades.
   Install Python dependencies with `python -m pip install -r requirements.txt`.
   PIUSI Tesseract OCR uses the detected bottom-row digit bounds first, then the
   lower TOTAL-row crop, with contrast, Otsu, and adaptive-threshold variants.
-  Conflicting six-digit results are held for manual review. If Tesseract returns
-  no digits but OpenCV finds a confident six-digit candidate, the form can offer
-  it as a manual suggestion; it is never auto-confirmed.
+  Conflicting six-digit results are held for manual review. OpenCV is used to
+  cross-check the OCR result, not to prefill the form when Tesseract returns no
+  digits.
   If the backend does not inherit the MacPorts path, set
   `TESSERACT_CMD=/opt/local/bin/tesseract`; common MacPorts and Homebrew paths
   are also detected automatically.
