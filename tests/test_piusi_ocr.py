@@ -72,6 +72,41 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.cumulative_total_litres, 1.663)
         self.assertTrue(any("disagree" in warning for warning in result.warnings))
 
+    def test_confident_segment_is_suggested_when_tesseract_returns_no_digits(
+        self,
+    ) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        result = _apply_piusi_total_evidence(
+            MeterOcrResult(status="uncertain"),
+            lcd,
+            "tesseract",
+        )
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertIsNone(result.cumulative_total_raw_digits)
+        self.assertEqual(result.cumulative_total_segment_raw_digits, "261563")
+        self.assertEqual(result.cumulative_total_suggested_raw_digits, "261563")
+        self.assertTrue(
+            any("Tesseract did not return TOTAL digits" in warning for warning in result.warnings)
+        )
+
+    def test_low_confidence_segment_is_not_suggested_without_ocr_digits(self) -> None:
+        lcd = recognize_piusi_total(REFERENCE.read_bytes())
+        lcd = replace(
+            lcd,
+            cumulative_total=replace(lcd.cumulative_total, confidence=0.54),
+        )
+        result = _apply_piusi_total_evidence(
+            MeterOcrResult(status="uncertain"),
+            lcd,
+            "tesseract",
+        )
+
+        self.assertIsNone(result.cumulative_total_suggested_raw_digits)
+        self.assertTrue(
+            any("confidence is low" in warning for warning in result.warnings)
+        )
+
     def test_complete_conflicting_candidates_require_manual_digits(self) -> None:
         lcd = recognize_piusi_total(REFERENCE.read_bytes())
         result = _apply_piusi_total_evidence(
