@@ -43,6 +43,9 @@ class MeterPhotoRead(BaseModel):
     uploaded_at: datetime
     registration_number: str
     ocr_status: str
+    ocr_cumulative_total_raw_digits: str | None = None
+    ocr_cumulative_total_segment_raw_digits: str | None = None
+    ocr_warnings: list[str] | None = None
     suggested_cumulative_total_raw_digits: str | None = None
     ocr_requires_manual_review: bool = False
     reading_warnings: list[str] | None = None

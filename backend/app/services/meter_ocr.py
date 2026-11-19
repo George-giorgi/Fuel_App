@@ -1398,14 +1398,13 @@ def _extract_tesseract_total(
                 or max(six_digit_candidates) < _GOOGLE_VISION_MIN_CONFIDENCE
             )
         ):
-            for page_segmentation_mode in (8, 13):
-                candidate = read_candidate(
-                    image_groups[0][0],
-                    page_segmentation_mode,
-                    use_lstm_engine=True,
-                )
-                if candidate is not None:
-                    candidates.append(candidate)
+            candidate = read_candidate(
+                image_groups[0][0],
+                8,
+                use_lstm_engine=True,
+            )
+            if candidate is not None:
+                candidates.append(candidate)
     except TesseractNotFoundError:
         return MeterOcrResult(
             status="unavailable",

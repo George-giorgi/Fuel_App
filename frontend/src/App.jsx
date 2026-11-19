@@ -41,6 +41,7 @@ import {
   formatMileage
 } from './utils/distance.js';
 import {
+  getCumulativeTotalDraftValue,
   formatRawMeterDigitsAsLitres,
   rawMeterDigitsToLitres
 } from './utils/meterReadings.js';
@@ -1136,9 +1137,28 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
             <div>
               <span className="meter-reading-label">
                 <AppIcon name="meter" size={14} />
-                <span>Suggested Global Cumulative Total</span>
+                <span>
+                  {photo.suggestedCumulativeTotalRawDigits
+                    ? 'Suggested Global Cumulative Total'
+                    : 'Unconfirmed TOTAL candidates'}
+                </span>
               </span>
               <strong>{formatOcrCumulativeTotal(photo)}</strong>
+              {!photo.suggestedCumulativeTotalRawDigits && (
+                <>
+                  <small className="meter-photo-copy">
+                    Tesseract: {formatOcrCandidate(photo.ocrCumulativeTotalRawDigits)};
+                    {' '}OpenCV: {formatOcrCandidate(photo.ocrCumulativeTotalSegmentRawDigits)}
+                  </small>
+                  {photo.ocrWarnings?.length > 0 && (
+                    <ul className="meter-ocr-warnings" aria-label="OCR warnings">
+                      {photo.ocrWarnings.map((warning, index) => (
+                        <li key={`${warning}-${index}`}>{warning}</li>
+                      ))}
+                    </ul>
+                  )}
+                </>
+              )}
             </div>
           </div>
           {(readingOcr || ['pending', 'processing'].includes(photo.ocrStatus)) && (
@@ -1980,11 +2000,28 @@ function formatOcrCumulativeTotal(photo) {
   if (photo.suggestedCumulativeTotalRawDigits) {
     return `${formatRawMeterDigitsAsLitres(photo.suggestedCumulativeTotalRawDigits)} litres`;
   }
+  const ocrDigits = photo.ocrCumulativeTotalRawDigits;
+  const segmentDigits = photo.ocrCumulativeTotalSegmentRawDigits;
+  if (
+    typeof ocrDigits === 'string' &&
+    /^[0-9]{6}$/.test(ocrDigits) &&
+    ocrDigits === segmentDigits
+  ) {
+    return `${formatRawMeterDigitsAsLitres(ocrDigits)} litres`;
+  }
+  if (
+    (typeof ocrDigits === 'string' && /^[0-9]{6}$/.test(ocrDigits)) ||
+    (typeof segmentDigits === 'string' && /^[0-9]{6}$/.test(segmentDigits))
+  ) {
+    return 'Compare the unconfirmed candidates below';
+  }
   return 'Check the TOTAL digits in the photo';
 }
 
-function cumulativeTotalDraftValue(photo) {
-  return photo.suggestedCumulativeTotalRawDigits || '';
+function formatOcrCandidate(rawDigits) {
+  return typeof rawDigits === 'string' && /^[0-9]{6}$/.test(rawDigits)
+    ? formatRawMeterReading(rawDigits)
+    : 'No six-digit candidate';
 }
 
 function downloadJson(value, filename) {

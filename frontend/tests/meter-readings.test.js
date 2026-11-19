@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   formatOcrCurrentFill,
   formatRawMeterDigitsAsLitres,
+  getCumulativeTotalDraftValue,
   ocrValueToRawDigits
 } from '../src/utils/meterReadings.js';
 
@@ -32,6 +33,52 @@ test('does not format invalid raw meter digits', () => {
   assert.equal(formatRawMeterDigitsAsLitres(''), null);
   assert.equal(formatRawMeterDigitsAsLitres('20.000'), null);
   assert.equal(formatRawMeterDigitsAsLitres('20,000'), null);
+});
+
+test('prefills an unconfirmed total only when OCR and OpenCV agree', () => {
+  assert.equal(
+    getCumulativeTotalDraftValue({
+      ocrStatus: 'uncertain',
+      ocrCumulativeTotalRawDigits: '261995',
+      ocrCumulativeTotalSegmentRawDigits: '261995'
+    }),
+    '261995'
+  );
+  assert.equal(
+    getCumulativeTotalDraftValue({
+      ocrStatus: 'uncertain',
+      ocrCumulativeTotalRawDigits: '681995',
+      ocrCumulativeTotalSegmentRawDigits: '261995'
+    }),
+    ''
+  );
+  assert.equal(
+    getCumulativeTotalDraftValue({
+      ocrStatus: 'uncertain',
+      ocrCumulativeTotalRawDigits: '26798',
+      ocrCumulativeTotalSegmentRawDigits: '261798'
+    }),
+    ''
+  );
+  assert.equal(
+    getCumulativeTotalDraftValue({
+      ocrStatus: 'failed',
+      ocrCumulativeTotalRawDigits: '261995',
+      ocrCumulativeTotalSegmentRawDigits: '261995'
+    }),
+    ''
+  );
+});
+
+test('prefers a six-digit confirmed OCR suggestion for the draft', () => {
+  assert.equal(
+    getCumulativeTotalDraftValue({
+      suggestedCumulativeTotalRawDigits: '261995',
+      ocrCumulativeTotalRawDigits: '681995',
+      ocrCumulativeTotalSegmentRawDigits: '261995'
+    }),
+    '261995'
+  );
 });
 
 test('formats OCR current fill integers as raw milli-litres', () => {

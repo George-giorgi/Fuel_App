@@ -23,6 +23,24 @@ export function formatRawMeterDigitsAsLitres(rawDigits) {
   return `${wholeLitres}.${milliLitres}`;
 }
 
+export function getCumulativeTotalDraftValue(photo) {
+  const suggested = photo?.suggestedCumulativeTotalRawDigits;
+  if (typeof suggested === 'string' && /^[0-9]{6}$/.test(suggested)) {
+    return suggested;
+  }
+  if (photo?.ocrStatus !== 'uncertain') return '';
+
+  const ocrDigits = photo?.ocrCumulativeTotalRawDigits;
+  const segmentDigits = photo?.ocrCumulativeTotalSegmentRawDigits;
+  return (
+    typeof ocrDigits === 'string' &&
+    /^[0-9]{6}$/.test(ocrDigits) &&
+    ocrDigits === segmentDigits
+  )
+    ? ocrDigits
+    : '';
+}
+
 export function rawMeterDigitsToLitres(rawDigits) {
   if (typeof rawDigits !== 'string' || !/^[0-9]{1,18}$/.test(rawDigits)) {
     return null;

@@ -295,8 +295,11 @@ imported. The Render start command applies schema-only Alembic upgrades.
   returned six-digit candidates with each other and the independent OpenCV
   result; low-confidence reads also retry the detected digit crop with
   alternate page segmentation. The form is prefilled only when the evidence
-  agrees. Google Cloud Vision is an optional provider and can request both
-  `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION` as additional evidence.
+  agrees. For uncertain results, Tesseract and OpenCV candidates are shown for
+  manual comparison; matching candidates may prefill the editable review field,
+  but still require explicit confirmation. Google Cloud Vision is an optional
+  provider and can request both `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION`
+  as additional evidence.
 - Both rows' raw digits are interpreted as integer milli-litres with three
   fractional decimal places (`22032` = `22.032 L`, `77001` = `77.001 L`,
   `100000` = `100.000 L`, and TOTAL `261563` = `261.563 L`). The row-specific

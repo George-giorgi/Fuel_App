@@ -188,7 +188,6 @@ class PiusiOcrTests(unittest.TestCase):
             {"text": ["6995"], "conf": ["0"]},
             {},
             {"text": ["261995"], "conf": ["22"]},
-            {"text": ["261995"], "conf": ["22"]},
         ]
         with patch(
             "pytesseract.image_to_data", side_effect=outputs
@@ -200,10 +199,8 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.status, "uncertain")
         self.assertEqual(result.cumulative_total_raw_digits, "261995")
         self.assertEqual(result.cumulative_total_confidence, 22)
-        self.assertEqual(image_to_data.call_count, 8)
-        self.assertIn("--psm 8", image_to_data.call_args_list[-2].kwargs["config"])
-        self.assertIn("--psm 13", image_to_data.call_args_list[-1].kwargs["config"])
-        self.assertIn("--oem 1", image_to_data.call_args_list[-2].kwargs["config"])
+        self.assertEqual(image_to_data.call_count, 7)
+        self.assertIn("--psm 8", image_to_data.call_args_list[-1].kwargs["config"])
         self.assertIn("--oem 1", image_to_data.call_args_list[-1].kwargs["config"])
         self.assertTrue(
             any("preprocessing variants disagree" in warning for warning in result.warnings)

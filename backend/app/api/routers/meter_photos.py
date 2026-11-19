@@ -273,6 +273,13 @@ def _meter_photo_read(
         uploaded_at=meter_photo.uploaded_at,
         registration_number=registration_number,
         ocr_status=meter_photo.ocr_status,
+        ocr_cumulative_total_raw_digits=(
+            meter_photo.ocr_cumulative_total_raw_digits
+        ),
+        ocr_cumulative_total_segment_raw_digits=(
+            meter_photo.ocr_cumulative_total_segment_raw_digits
+        ),
+        ocr_warnings=meter_photo.ocr_warnings,
         suggested_cumulative_total_raw_digits=(
             meter_photo.suggested_cumulative_total_raw_digits
         ),

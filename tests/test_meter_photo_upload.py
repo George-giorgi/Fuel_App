@@ -249,6 +249,7 @@ class MeterPhotoUploadTests(unittest.TestCase):
                 status="uncertain",
                 provider="google_vision",
                 cumulative_total_raw_digits="26798",
+                cumulative_total_segment_raw_digits="261798",
                 cumulative_total_suggested_raw_digits=None,
                 warnings=("The TOTAL row needs manual review.",),
             )
@@ -283,9 +284,13 @@ class MeterPhotoUploadTests(unittest.TestCase):
                 registration,
             ).model_dump(by_alias=True)
             self.assertTrue(fields["ocrRequiresManualReview"])
-            self.assertNotIn("ocrCumulativeTotalRawDigits", fields)
-            self.assertNotIn("ocrCumulativeTotalSegmentRawDigits", fields)
-            self.assertNotIn("ocrWarnings", fields)
+            self.assertEqual(fields["ocrCumulativeTotalRawDigits"], "26798")
+            self.assertEqual(
+                fields["ocrCumulativeTotalSegmentRawDigits"], "261798"
+            )
+            self.assertEqual(
+                fields["ocrWarnings"], ["The TOTAL row needs manual review."]
+            )
 
     def test_upload_ocr_correction_and_confirmation_preserve_evidence(self) -> None:
         original = self.image_bytes
