@@ -1378,33 +1378,39 @@ def _extract_tesseract_total(
                 sum(score for _, score in words) / len(words),
             )
 
-        for image_group in image_groups:
-            group_candidates = []
-            for image in image_group:
-                candidate = read_candidate(image, 7)
-                if candidate is not None:
-                    group_candidates.append(candidate)
-            candidates.extend(group_candidates)
+        stop_after_candidate = False
+        if image_groups:
+            primary_candidate = read_candidate(image_groups[0][0], 7)
+            if primary_candidate is not None:
+                candidates.append(primary_candidate)
+                stop_after_candidate = (
+                    len(primary_candidate[0]) == 6
+                    and primary_candidate[1] >= _GOOGLE_VISION_MIN_CONFIDENCE
+                )
 
-        six_digit_candidates = [
-            confidence
-            for digits, confidence in candidates
-            if len(digits) == 6
-        ]
-        if (
-            image_groups
-            and (
-                not six_digit_candidates
-                or max(six_digit_candidates) < _GOOGLE_VISION_MIN_CONFIDENCE
-            )
-        ):
-            candidate = read_candidate(
-                image_groups[0][0],
-                8,
-                use_lstm_engine=True,
-            )
-            if candidate is not None:
-                candidates.append(candidate)
+            if not stop_after_candidate:
+                fallback_candidate = read_candidate(
+                    image_groups[0][0],
+                    8,
+                    use_lstm_engine=True,
+                )
+                if fallback_candidate is not None:
+                    candidates.append(fallback_candidate)
+                    stop_after_candidate = len(fallback_candidate[0]) == 6
+
+            if not stop_after_candidate:
+                for group_index, image_group in enumerate(image_groups):
+                    for image_index, image in enumerate(image_group):
+                        if group_index == 0 and image_index == 0:
+                            continue
+                        candidate = read_candidate(image, 7)
+                        if candidate is not None:
+                            candidates.append(candidate)
+                            if len(candidate[0]) == 6:
+                                stop_after_candidate = True
+                                break
+                    if stop_after_candidate:
+                        break
     except TesseractNotFoundError:
         return MeterOcrResult(
             status="unavailable",
@@ -1464,7 +1470,7 @@ def _extract_tesseract_total(
     )
     if len(complete_candidates) > 1:
         warning = (
-            "Tesseract preprocessing variants disagree on TOTAL-row digits "
+            "Tesseract passes disagree on TOTAL-row digits "
             f"({', '.join(complete_candidates)}); manual review is required."
         )
         result = replace(

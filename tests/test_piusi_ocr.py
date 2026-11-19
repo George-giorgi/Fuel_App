@@ -141,7 +141,7 @@ class PiusiOcrTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.cumulative_total_raw_digits, "261563")
-        self.assertEqual(image_to_data.call_count, 6)
+        self.assertEqual(image_to_data.call_count, 1)
         with Image.open(BytesIO(lcd.display_crop)) as display:
             full_display_height = round(display.height * 1600 / display.width)
         self.assertTrue(
@@ -151,14 +151,10 @@ class PiusiOcrTests(unittest.TestCase):
             )
         )
 
-    def test_tesseract_disagreeing_bottom_row_variants_require_review(self) -> None:
+    def test_tesseract_disagreeing_fast_passes_require_review(self) -> None:
         outputs = [
-            {"text": ["261563"], "conf": ["96"]},
-            {"text": ["261563"], "conf": ["95"]},
-            {"text": ["261563"], "conf": ["94"]},
-            {"text": ["261798"], "conf": ["96"]},
+            {"text": ["261563"], "conf": ["70"]},
             {"text": ["261798"], "conf": ["95"]},
-            {"text": ["261798"], "conf": ["94"]},
         ]
         with patch(
             "pytesseract.image_to_data", side_effect=outputs
@@ -168,13 +164,13 @@ class PiusiOcrTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "uncertain")
-        self.assertEqual(image_to_data.call_count, 6)
+        self.assertEqual(image_to_data.call_count, 2)
         self.assertTrue(
-            any("preprocessing variants disagree" in warning for warning in result.warnings)
+            any("Tesseract passes disagree" in warning for warning in result.warnings)
         )
         self.assertEqual(
             result.cumulative_total_raw_digits,
-            "261563",
+            "261798",
         )
 
     def test_tesseract_retries_low_confidence_digit_crop_with_alternate_psm(
@@ -182,11 +178,6 @@ class PiusiOcrTests(unittest.TestCase):
     ) -> None:
         outputs = [
             {"text": ["6995"], "conf": ["0"]},
-            {"text": ["76995"], "conf": ["0"]},
-            {},
-            {"text": ["681995"], "conf": ["0"]},
-            {"text": ["6995"], "conf": ["0"]},
-            {},
             {"text": ["261995"], "conf": ["22"]},
         ]
         with patch(
@@ -199,17 +190,18 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.status, "uncertain")
         self.assertEqual(result.cumulative_total_raw_digits, "261995")
         self.assertEqual(result.cumulative_total_confidence, 22)
-        self.assertEqual(image_to_data.call_count, 7)
+        self.assertEqual(image_to_data.call_count, 2)
         self.assertIn("--psm 8", image_to_data.call_args_list[-1].kwargs["config"])
         self.assertIn("--oem 1", image_to_data.call_args_list[-1].kwargs["config"])
         self.assertTrue(
-            any("preprocessing variants disagree" in warning for warning in result.warnings)
+            any("confidence is low" in warning for warning in result.warnings)
         )
 
     def test_tesseract_falls_back_to_lower_row_when_digit_crop_is_unreadable(
         self,
     ) -> None:
         outputs = [
+            {},
             {},
             {},
             {},
@@ -227,7 +219,7 @@ class PiusiOcrTests(unittest.TestCase):
 
         self.assertEqual(result.status, "ready")
         self.assertEqual(result.cumulative_total_raw_digits, "261563")
-        self.assertEqual(image_to_data.call_count, 6)
+        self.assertEqual(image_to_data.call_count, 5)
 
     def test_tesseract_unreadable_message_names_selected_provider(self) -> None:
         result = _total_ocr_result("", 0, "tesseract")
