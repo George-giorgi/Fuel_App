@@ -500,7 +500,7 @@ function MeterPhotoFlow({ onVerified, vehicleId }) {
 
   useEffect(() => {
     if (!photo || photo.verifiedAt || cumulativeTotalEdited) return;
-    setCumulativeTotalDraft(cumulativeTotalDraftValue(photo));
+    setCumulativeTotalDraft(getCumulativeTotalDraftValue(photo));
   }, [photo, cumulativeTotalEdited]);
 
   useEffect(() => {
