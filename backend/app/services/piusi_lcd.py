@@ -605,6 +605,17 @@ def _search_row_windows(
                     x2 = round(scaled_width * bounds[2])
                     y2 = round(scaled_height * bounds[3])
                     digit_crop = _crop_digit_group(scaled_display, reading)
+                    if scale != 1 and reading.digit_bounds is not None:
+                        reading = LcdRowReading(
+                            raw_digits=reading.raw_digits,
+                            decimal_position=reading.decimal_position,
+                            value=reading.value,
+                            confidence=reading.confidence,
+                            digit_bounds=tuple(
+                                round(coordinate / scale)
+                                for coordinate in reading.digit_bounds
+                            ),
+                        )
                     candidates.append(
                         (
                             reading,
@@ -841,18 +852,28 @@ def recognize_piusi_total(content: bytes) -> PiusiTotalRecognition:
         )
 
     height = display.shape[0]
-    bounds = (0.15, 0.65, 0.95, 0.96)
     total_row = _total_row_crop(display)
     total = _recognize_row(
         display,
-        bounds,
+        (0.05, 0.60, 0.85, 0.98),
         minimum_digits=6,
         split_wide_glyphs=True,
         segment_threshold=0.45,
         whole_number=True,
         expected_digits=6,
-        mask_right_fraction=0.71,
+        mask_right_fraction=0.85,
     )
+    if total.raw_digits is None:
+        total = _recognize_row(
+            display,
+            (0.15, 0.65, 0.95, 0.96),
+            minimum_digits=6,
+            split_wide_glyphs=True,
+            segment_threshold=0.45,
+            whole_number=True,
+            expected_digits=6,
+            mask_right_fraction=0.71,
+        )
     warnings = []
     if total.raw_digits is None or height <= 100:
         alternative, _, ambiguous = _search_row_windows(

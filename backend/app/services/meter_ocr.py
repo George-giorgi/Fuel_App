@@ -1343,33 +1343,69 @@ def _extract_tesseract_total(
     pytesseract.pytesseract.tesseract_cmd = _get_tesseract_command()
     try:
         candidates: list[tuple[str, float]] = []
-        for image_group in _prepare_tesseract_total_image_groups(lcd):
+        image_groups = _prepare_tesseract_total_image_groups(lcd)
+
+        def read_candidate(
+            image: Image.Image,
+            page_segmentation_mode: int,
+            *,
+            use_lstm_engine: bool = False,
+        ) -> tuple[str, float] | None:
+            engine_config = "--oem 1 " if use_lstm_engine else ""
+            output = pytesseract.image_to_data(
+                image,
+                config=(
+                    f"{engine_config}--psm {page_segmentation_mode} "
+                    "-c tessedit_char_whitelist=0123456789"
+                ),
+                output_type=Output.DICT,
+            )
+            words = [
+                (str(text).strip(), float(confidence))
+                for text, confidence in zip(
+                    output.get("text", []), output.get("conf", [])
+                )
+                if (
+                    str(text).strip().isascii()
+                    and str(text).strip().isdigit()
+                    and float(confidence) >= 0
+                )
+            ]
+            if not words:
+                return None
+            return (
+                "".join(word for word, _ in words),
+                sum(score for _, score in words) / len(words),
+            )
+
+        for image_group in image_groups:
             group_candidates = []
             for image in image_group:
-                output = pytesseract.image_to_data(
-                    image,
-                    config="--psm 7 -c tessedit_char_whitelist=0123456789",
-                    output_type=Output.DICT,
-                )
-                words = [
-                    (str(text).strip(), float(confidence))
-                    for text, confidence in zip(
-                        output.get("text", []), output.get("conf", [])
-                    )
-                    if (
-                        str(text).strip().isascii()
-                        and str(text).strip().isdigit()
-                        and float(confidence) >= 0
-                    )
-                ]
-                if words:
-                    group_candidates.append(
-                        (
-                            "".join(word for word, _ in words),
-                            sum(score for _, score in words) / len(words),
-                        )
-                    )
+                candidate = read_candidate(image, 7)
+                if candidate is not None:
+                    group_candidates.append(candidate)
             candidates.extend(group_candidates)
+
+        six_digit_candidates = [
+            confidence
+            for digits, confidence in candidates
+            if len(digits) == 6
+        ]
+        if (
+            image_groups
+            and (
+                not six_digit_candidates
+                or max(six_digit_candidates) < _GOOGLE_VISION_MIN_CONFIDENCE
+            )
+        ):
+            for page_segmentation_mode in (8, 13):
+                candidate = read_candidate(
+                    image_groups[0][0],
+                    page_segmentation_mode,
+                    use_lstm_engine=True,
+                )
+                if candidate is not None:
+                    candidates.append(candidate)
     except TesseractNotFoundError:
         return MeterOcrResult(
             status="unavailable",

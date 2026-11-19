@@ -22,6 +22,7 @@ from backend.app.services.meter_ocr import (
     _apply_piusi_total_evidence,
     _apply_piusi_evidence,
     _google_vision_text_detection_disagrees,
+    _prepare_tesseract_total_image_groups,
     _total_ocr_result,
     extract_meter_readings,
     parse_meter_ocr_data,
@@ -174,6 +175,38 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(
             result.cumulative_total_raw_digits,
             "261563",
+        )
+
+    def test_tesseract_retries_low_confidence_digit_crop_with_alternate_psm(
+        self,
+    ) -> None:
+        outputs = [
+            {"text": ["6995"], "conf": ["0"]},
+            {"text": ["76995"], "conf": ["0"]},
+            {},
+            {"text": ["681995"], "conf": ["0"]},
+            {"text": ["6995"], "conf": ["0"]},
+            {},
+            {"text": ["261995"], "conf": ["22"]},
+            {"text": ["261995"], "conf": ["22"]},
+        ]
+        with patch(
+            "pytesseract.image_to_data", side_effect=outputs
+        ) as image_to_data:
+            result = _extract_tesseract_total(
+                recognize_piusi_total(REFERENCE.read_bytes())
+            )
+
+        self.assertEqual(result.status, "uncertain")
+        self.assertEqual(result.cumulative_total_raw_digits, "261995")
+        self.assertEqual(result.cumulative_total_confidence, 22)
+        self.assertEqual(image_to_data.call_count, 8)
+        self.assertIn("--psm 8", image_to_data.call_args_list[-2].kwargs["config"])
+        self.assertIn("--psm 13", image_to_data.call_args_list[-1].kwargs["config"])
+        self.assertIn("--oem 1", image_to_data.call_args_list[-2].kwargs["config"])
+        self.assertIn("--oem 1", image_to_data.call_args_list[-1].kwargs["config"])
+        self.assertTrue(
+            any("preprocessing variants disagree" in warning for warning in result.warnings)
         )
 
     def test_tesseract_falls_back_to_lower_row_when_digit_crop_is_unreadable(
@@ -424,6 +457,13 @@ class PiusiOcrTests(unittest.TestCase):
         self.assertEqual(result.cumulative_total.raw_digits, "261798")
         self.assertEqual(len(result.cumulative_total.raw_digits), 6)
         self.assertTrue(result.total_row_crop)
+        with Image.open(BytesIO(result.display_crop)) as display:
+            left, top, right, bottom = result.cumulative_total.digit_bounds
+            self.assertGreaterEqual(left, 0)
+            self.assertGreaterEqual(top, 0)
+            self.assertLessEqual(right, display.width)
+            self.assertLessEqual(bottom, display.height)
+        self.assertTrue(_prepare_tesseract_total_image_groups(result))
 
     def test_current_fill_rejects_a_truncated_three_digit_reading(self) -> None:
         display = np.zeros((100, 200, 3), dtype=np.uint8)

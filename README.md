@@ -287,13 +287,16 @@ imported. The Render start command applies schema-only Alembic upgrades.
   separately, and uses OpenCV to classify seven-segment digits. It preserves
   the two rows' raw digits separately. The bottom-row recognizer also checks
   locally adaptive grayscale masks for lighting/color variation and requires
-  six digits with matching mask results; otherwise it asks for manual review.
+  six digits with matching mask results. It tries a tighter TOTAL-row crop
+  before broader alternate windows; an unreadable or ambiguous result requires
+  manual review.
   Production uses Tesseract on both the detected digit crop and the full TOTAL
   row, with contrast, Otsu, and adaptive-threshold variants. It compares all
   returned six-digit candidates with each other and the independent OpenCV
-  result; the form is prefilled only when the evidence agrees. Google Cloud
-  Vision is an optional provider and can request both `TEXT_DETECTION` and
-  `DOCUMENT_TEXT_DETECTION` as additional evidence.
+  result; low-confidence reads also retry the detected digit crop with
+  alternate page segmentation. The form is prefilled only when the evidence
+  agrees. Google Cloud Vision is an optional provider and can request both
+  `TEXT_DETECTION` and `DOCUMENT_TEXT_DETECTION` as additional evidence.
 - Both rows' raw digits are interpreted as integer milli-litres with three
   fractional decimal places (`22032` = `22.032 L`, `77001` = `77.001 L`,
   `100000` = `100.000 L`, and TOTAL `261563` = `261.563 L`). The row-specific
